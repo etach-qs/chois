@@ -79,15 +79,15 @@ if __name__ == "__main__":
         
         condition_obj_object.rotation_euler = (math.radians(0), math.radians(0), math.radians(0)) # The default seems 90, 0, 0 while importing .obj into blender 
        
-        # human_mat = bpy.data.materials.new(name="MaterialName")  # set new material to variable
-        # condition_obj_object.data.materials.append(human_mat)
-        # human_mat.use_nodes = True
-        # principled_bsdf = human_mat.node_tree.nodes['Principled BSDF']
-        # if principled_bsdf is not None:
-        #     # principled_bsdf.inputs[0].default_value = (220/255.0, 220/255.0, 220/255.0, 1) # Gray, close to white after rendering 
-        #     principled_bsdf.inputs[0].default_value = (10/255.0, 30/255.0, 225/255.0, 1) # Light Blue, used for floor scene 
+        human_mat = bpy.data.materials.new(name="MaterialName")  # set new material to variable
+        condition_obj_object.data.materials.append(human_mat)
+        human_mat.use_nodes = True
+        principled_bsdf = human_mat.node_tree.nodes['Principled BSDF']
+        if principled_bsdf is not None:
+            # principled_bsdf.inputs[0].default_value = (220/255.0, 220/255.0, 220/255.0, 1) # Gray, close to white after rendering 
+            principled_bsdf.inputs[0].default_value = (10/255.0, 30/255.0, 225/255.0, 1) # Light Blue, used for floor scene 
 
-        # condition_obj_object.active_material = human_mat
+        condition_obj_object.active_material = human_mat
 
         condition_obj_object.active_material = bpy.data.materials.get("green")
     

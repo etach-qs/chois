@@ -141,6 +141,47 @@ class DecoderLayer(nn.Module):
         return decoder_out, dec_self_attn
         # BS X T X D, BS X T X T
 
+class MeshDecoderLayer(nn.Module):
+    def __init__(self, d_model, n_head, d_k, d_v):
+        super(MeshDecoderLayer, self).__init__()
+
+        self.self_attn = MultiHeadAttention(n_head, d_model, d_k, d_v)
+        self.pos_ffn = PositionwiseFeedForward(d_model, d_model)
+        self.cross_attn = MultiHeadAttention(n_head, d_model, d_k, d_v)
+       
+    def forward(self, decoder_input, self_attn_time_mask, self_attn_padding_mask,mesh_embedding=None):
+        # decode_input: BS X T X D
+        # time_mask: BS X T X T (padding postion are ones)
+        # padding_mask: BS X T (padding position are zeros, diff usage from above)
+        # mesh_embedding: BS X T X D
+        bs, dec_len, dec_hidden = decoder_input.shape
+        
+        decoder_out, dec_self_attn = self.self_attn(decoder_input, decoder_input, decoder_input, \
+                                mask=self_attn_time_mask)
+        # BS X T X D, BS X T X T
+        decoder_out *= self_attn_padding_mask.unsqueeze(-1).float()
+        # BS X T X D
+
+        # Cross-attention (if mesh_embedding is provided)
+        if mesh_embedding is not None:
+            # Mesh embedding: BS X T_mesh X D
+            # Use decoder_out as query, mesh_embedding as key and value
+            decoder_out, cross_attn = self.cross_attn(
+                decoder_out,  # Query: BS X T X D
+                mesh_embedding,  # Key: BS X T_mesh X D
+                mesh_embedding,  # Value: BS X T_mesh X D
+                mask=None  # No mask for cross-attention (or add one if needed)
+            )
+            # BS X T X D, BS X T X T_mesh
+            # Apply padding mask again
+            decoder_out *= self_attn_padding_mask.unsqueeze(-1).float()  # BS X T X D
+        
+        
+        decoder_out = self.pos_ffn(decoder_out) # BS X T X D
+        decoder_out *= self_attn_padding_mask.unsqueeze(-1).float()
+
+        return decoder_out, dec_self_attn
+        # BS X T X D, BS X T X T
 
 class Decoder(nn.Module):
     def __init__(
@@ -153,22 +194,24 @@ class Decoder(nn.Module):
         self.position_vec = nn.Embedding.from_pretrained(
             get_sinusoid_encoding_table(max_timesteps+1, d_model, padding_idx=0),
             freeze=True)
-        self.layer_stack = nn.ModuleList([DecoderLayer(d_model, n_head, d_k, d_v)
+        self.layer_stack = nn.ModuleList([MeshDecoderLayer(d_model, n_head, d_k, d_v)
             for _ in range(n_layers)])
+
 
         self.use_full_attention = use_full_attention 
 
-    def forward(self, decoder_input, padding_mask, decoder_pos_vec, obj_embedding=None):
+
+
+
+    def forward(self, decoder_input, padding_mask, decoder_pos_vec, obj_embedding=None,mesh_embedding=None):
         # decoder_input: BS X D X T 
         # padding_mask: BS X 1 X T
         # decoder_pos_vec: BS X 1 X T
         # obj_embedding: BS X 1 X D
-
         dec_self_attn_list = []
-
+       
         padding_mask = padding_mask.squeeze(1) # BS X T
         decoder_pos_vec = decoder_pos_vec.squeeze(1) # BS X T
-
         input_embedding = self.start_conv(decoder_input)  # BS X D X T
         input_embedding = input_embedding.transpose(1, 2) # BS X T X D
         if obj_embedding is not None:
@@ -187,13 +230,17 @@ class Decoder(nn.Module):
         # BS X T X T (Prev steps are 0, later 1)
        
         dec_output = new_input_embedding + pos_embedding # BS X T X D
+        
+      
         for dec_layer in self.layer_stack:
             dec_output, dec_self_attn = dec_layer(
                 dec_output, # BS X T X D
                 self_attn_time_mask=time_mask, # BS X T X T
-                self_attn_padding_mask=padding_mask) # BS X T
-
+                self_attn_padding_mask=padding_mask, # BS X T
+                mesh_embedding=mesh_embedding)  # BS X 512 X num_frames
+                
             dec_self_attn_list += [dec_self_attn]
+        
 
         return dec_output, dec_self_attn_list
         # BS X T X D, list

@@ -1,6 +1,6 @@
 import math 
 import numpy as np
-
+import pdb
 import os 
 import matplotlib.pyplot as plt
 
@@ -20,7 +20,8 @@ from manip.data.cano_traj_dataset import quat_fk_torch, quat_ik_torch
 
 from manip.model.transformer_module import Decoder 
 from manip.lafan1.utils import rotate_at_frame_w_obj_global, rotate_at_frame_w_obj, quat_slerp 
-
+from .pointnetv2_segmentation import PointNetv2Seg
+from .pointnetv2 import PointNetv2
 import time as PyTime 
 
 def exists(x):
@@ -168,7 +169,10 @@ class LearnedSinusoidalPosEmb(nn.Module):
         fouriered = torch.cat((freqs.sin(), freqs.cos()), dim = -1)
         fouriered = torch.cat((x, fouriered), dim = -1)
         return fouriered
-        
+
+
+
+
 class TransformerDiffusionModel(nn.Module):
     def __init__(
         self,
@@ -196,7 +200,7 @@ class TransformerDiffusionModel(nn.Module):
         self.motion_transformer = Decoder(d_feats=d_input_feats, d_model=self.d_model, \
             n_layers=self.n_dec_layers, n_head=self.n_head, d_k=self.d_k, d_v=self.d_v, \
             max_timesteps=self.max_timesteps, use_full_attention=True)  
-
+      
         self.linear_out = nn.Linear(self.d_model, self.d_feats)
 
         # For noise level t embedding
@@ -221,13 +225,34 @@ class TransformerDiffusionModel(nn.Module):
             nn.Linear(time_dim, d_model)
         )
 
-    def forward(self, src, noise_t, condition, language_embedding=None, padding_mask=None):
+       
+        #self.encoder_sbjobj = PointNetv2Seg()
+
+        self.encoder_subject = PointNetv2(normal_channel=True, with_decoder=False).cuda()
+        
+    def forward(self, src, noise_t, condition, language_embedding=None, padding_mask=None, mesh_condition=None):
         # src: BS X T X D
         # noise_t: int 
-
+      
         src = torch.cat((src, condition), dim=-1)
        
         noise_t_embed = self.time_mlp(noise_t) # BS X d_model 
+    
+        # add mesh condition
+        if mesh_condition is not None:
+            bs, num_frames, num_points, _ = mesh_condition.shape
+            mask_sbj = torch.zeros((bs * num_frames, num_points-500, 1), dtype=torch.float, device=mesh_condition.device)
+            mask_obj = torch.ones((bs * num_frames, num_points-1000, 1), dtype=torch.float, device=mesh_condition.device)
+            mask_sbjobj = torch.cat([mask_sbj, mask_obj], dim=1)
+            mesh_condition = mesh_condition.view(bs * num_frames, num_points, -1)  # (BS * num_frames) X num_points X 3
+            mesh_condition = torch.cat([mesh_condition,mask_sbjobj],dim=-1)
+            mesh_embedding = self.encoder_subject(mesh_condition)  # (BS * num_frames) X 512
+            mesh_embedding = mesh_embedding.view(bs, num_frames, -1)  # BS X num_frames X 512
+            #mesh_embedding = mesh_embedding.transpose(1, 2)  # BS X 512 X num_frames
+        else:
+            mesh_embedding = None
+
+
         if language_embedding is not None:
             noise_t_embed += language_embedding # BS X d_model 
         noise_t_embed = noise_t_embed[:, None, :] # BS X 1 X d_model 
@@ -243,13 +268,16 @@ class TransformerDiffusionModel(nn.Module):
         pos_vec = pos_vec[None, None, :].to(src.device).repeat(bs, 1, 1) # BS X 1 X timesteps
 
         data_input = src.transpose(1, 2) # BS X D X T 
-        feat_pred, _ = self.motion_transformer(data_input, padding_mask, pos_vec, obj_embedding=noise_t_embed)
+        feat_pred, _ = self.motion_transformer(data_input, padding_mask, pos_vec, obj_embedding=noise_t_embed, \
+                                               mesh_embedding=mesh_embedding)
        
         output = self.linear_out(feat_pred[:, 1:]) # BS X T X D
 
         return output # predicted noise, the same size as the input 
 
-    
+
+
+
 class ObjectCondGaussianDiffusion(nn.Module):
     def __init__(
         self,
@@ -269,7 +297,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
         p2_loss_weight_gamma = 0., # p2 loss weight, from https://arxiv.org/abs/2204.00227 - 0 is equivalent to weight of 1 across time - 1. is recommended
         p2_loss_weight_k = 1,
         input_first_human_pose=False, 
-        use_object_keypoints=False, 
+        use_object_keypoints=False
     ):
         super().__init__()
 
@@ -284,7 +312,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
             )
 
         self.input_first_human_pose = input_first_human_pose 
-        
+    
         # Input: (BS*T) X 3 X N 
         # Output: (BS*T) X d X N, (BS*T) X d 
         # self.object_encoder = Pointnet() 
@@ -322,7 +350,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
         # helper function to register buffer from float64 to float32
 
         register_buffer = lambda name, val: self.register_buffer(name, val.to(torch.float32))
-
+    
         register_buffer('betas', betas)
         register_buffer('alphas_cumprod', alphas_cumprod)
         register_buffer('alphas_cumprod_prev', alphas_cumprod_prev)
@@ -369,11 +397,11 @@ class ObjectCondGaussianDiffusion(nn.Module):
         posterior_log_variance_clipped = extract(self.posterior_log_variance_clipped, t, x_t.shape)
         return posterior_mean, posterior_variance, posterior_log_variance_clipped
 
-    def p_mean_variance(self, x, t, x_cond, language_embedding=None, padding_mask=None, clip_denoised=True):
+    def p_mean_variance(self, x, t, x_cond, language_embedding=None, padding_mask=None, clip_denoised=True, mesh_condition=None):
         # x_all = torch.cat((x, x_cond), dim=-1)
         # model_output = self.denoise_fn(x_all, t)
 
-        model_output = self.denoise_fn(x, t, x_cond, language_embedding, padding_mask)
+        model_output = self.denoise_fn(x, t, x_cond, language_embedding, padding_mask, mesh_condition)
 
         if self.objective == 'pred_noise':
             x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
@@ -396,7 +424,8 @@ class ObjectCondGaussianDiffusion(nn.Module):
                                     prev_window_init_root_trans=None, \
                                     contact_labels=None, \
                                     curr_window_ref_obj_rot_mat=None, \
-                                    clip_denoised=True):
+                                    clip_denoised=True, \
+                                    mesh_condition=None):
         # x_all = torch.cat((x, x_cond), dim=-1)
         # model_output = self.denoise_fn(x_all, t)
         with torch.enable_grad():
@@ -404,7 +433,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
             # For reconstruction guidance 
             x = x.detach().requires_grad_(True)
 
-            model_output = self.denoise_fn(x, t, x_cond, language_embedding, padding_mask)
+            model_output = self.denoise_fn(x, t, x_cond, language_embedding, padding_mask, mesh_condition)
 
             if self.objective == 'pred_noise':
                 x_start = self.predict_start_from_noise(x, t = t, noise = model_output)
@@ -451,7 +480,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
                     opt_fn=None, clip_denoised=True, \
                     rest_human_offsets=None, data_dict=None, cond_mask=None, padding_mask=None, \
                     prev_window_cano_rot_mat=None, prev_window_init_root_trans=None, \
-                    contact_labels=None, curr_window_ref_obj_rot_mat=None):
+                    contact_labels=None, curr_window_ref_obj_rot_mat=None, mesh_condition=None):
         b, *_, device = *x.shape, x.device
 
         use_reconstruction_guidance = True 
@@ -465,13 +494,15 @@ class ObjectCondGaussianDiffusion(nn.Module):
                                         prev_window_cano_rot_mat=prev_window_cano_rot_mat, \
                                         prev_window_init_root_trans=prev_window_init_root_trans, \
                                         contact_labels=contact_labels, \
-                                        curr_window_ref_obj_rot_mat=curr_window_ref_obj_rot_mat)  
+                                        curr_window_ref_obj_rot_mat=curr_window_ref_obj_rot_mat, \
+                                        mesh_condition=mesh_condition)  
             
             new_mean = model_mean 
         else: # Classifier-guidance 
             model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, x_cond=x_cond, \
                 language_embedding=language_embedding, \
-                padding_mask=padding_mask, clip_denoised=clip_denoised)
+                padding_mask=padding_mask, clip_denoised=clip_denoised, \
+                mesh_condition=mesh_condition)
 
             # classifier_scale = 1e3
 
@@ -510,7 +541,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
 
     def p_sample_loop_guided(self, shape, x_cond, guidance_fn=None, language_embedding=None, opt_fn=None, \
                     rest_human_offsets=None, data_dict=None, contact_labels=None, \
-                    cond_mask=None, padding_mask=None):
+                    cond_mask=None, padding_mask=None, mesh_condition=None):
         device = self.betas.device
 
         b = shape[0]
@@ -522,21 +553,22 @@ class ObjectCondGaussianDiffusion(nn.Module):
                             x_cond, guidance_fn, language_embedding=language_embedding, \
                             opt_fn=opt_fn, rest_human_offsets=rest_human_offsets, \
                             data_dict=data_dict, contact_labels=contact_labels, \
-                            cond_mask=cond_mask, padding_mask=padding_mask)  
+                            cond_mask=cond_mask, padding_mask=padding_mask, \
+                            mesh_condition=mesh_condition)  
 
                 # known_pose_conditions = x_cond[:, :, -x.shape[-1]:]
                 # x = (1 - cond_mask) * known_pose_conditions + cond_mask * x 
             else:
                 x = self.p_sample(x, torch.full((b,), i, device=device, dtype=torch.long), x_cond, \
-                    language_embedding, padding_mask=padding_mask)    
+                    language_embedding, padding_mask=padding_mask, mesh_condition=mesh_condition)    
 
         return x # BS X T X D
 
     @torch.no_grad()
-    def p_sample(self, x, t, x_cond, language_embedding=None, padding_mask=None, clip_denoised=True):
+    def p_sample(self, x, t, x_cond, language_embedding=None, padding_mask=None, clip_denoised=True, mesh_condition=None):
         b, *_, device = *x.shape, x.device
         model_mean, _, model_log_variance = self.p_mean_variance(x=x, t=t, x_cond=x_cond, language_embedding=language_embedding, \
-            padding_mask=padding_mask, clip_denoised=clip_denoised)
+            padding_mask=padding_mask, clip_denoised=clip_denoised, mesh_condition=mesh_condition)
         noise = torch.randn_like(x)
         # no noise when t == 0
         nonzero_mask = (1 - (t == 0).float()).reshape(b, *((1,) * (len(x.shape) - 1)))
@@ -544,7 +576,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
 
     @torch.no_grad()
     def p_sample_loop(self, shape, x_cond, language_embedding=None, padding_mask=None, \
-                cond_mask=None, ori_pose_cond=None, return_diff_level_res=False):
+                cond_mask=None, ori_pose_cond=None, return_diff_level_res=False, mesh_condition=None):
         device = self.betas.device
 
         b = shape[0]
@@ -941,9 +973,10 @@ class ObjectCondGaussianDiffusion(nn.Module):
     # @torch.no_grad()
     def sample(self, x_start, ori_x_cond, cond_mask=None, padding_mask=None, \
             language_input=None, contact_labels=None, rest_human_offsets=None, \
-            data_dict=None, guidance_fn=None, opt_fn=None, return_diff_level_res=False):
+            data_dict=None, guidance_fn=None, opt_fn=None, return_diff_level_res=False, \
+            mesh_condition=None):
         # naive conditional sampling by replacing the noisy prediction with input target data. 
-        self.denoise_fn.eval() 
+        self.denoise_fn.eval()
         self.bps_encoder.eval()
         self.clip_encoder.eval()
 
@@ -972,12 +1005,14 @@ class ObjectCondGaussianDiffusion(nn.Module):
                     x_cond, guidance_fn, opt_fn=opt_fn, \
                     language_embedding=language_embedding, rest_human_offsets=rest_human_offsets, \
                     data_dict=data_dict, contact_labels=contact_labels, \
-                    cond_mask=cond_mask, padding_mask=padding_mask)
+                    cond_mask=cond_mask, padding_mask=padding_mask, \
+                    mesh_condition=mesh_condition)
             # BS X T X D
         else:
             sample_res = self.p_sample_loop(x_start.shape, x_cond, \
                     language_embedding=language_embedding, padding_mask=padding_mask, \
-                    cond_mask=cond_mask, ori_pose_cond=x_start, return_diff_level_res=return_diff_level_res)
+                    cond_mask=cond_mask, ori_pose_cond=x_start, return_diff_level_res=return_diff_level_res, \
+                    mesh_condition=mesh_condition)
             # BS X T X D
 
         self.denoise_fn.train()
@@ -1208,15 +1243,15 @@ class ObjectCondGaussianDiffusion(nn.Module):
             raise ValueError(f'invalid loss type {self.loss_type}')
 
     def p_losses(self, x_start, x_cond, t, language_embedding=None, noise=None, \
-        padding_mask=None, rest_human_offsets=None, data_dict=None, ds=None):
+        padding_mask=None, rest_human_offsets=None, data_dict=None, ds=None, mesh_condition=None):
         # x_start: BS X T X D
         # x_cond: BS X T X D_cond
         # padding_mask: BS X 1 X T 
         noise = default(noise, lambda: torch.randn_like(x_start))
-
+        
         x = self.q_sample(x_start=x_start, t=t, noise=noise) # noisy motion in noise level t. 
 
-        model_out = self.denoise_fn(x, t, x_cond, language_embedding=language_embedding, padding_mask=padding_mask)
+        model_out = self.denoise_fn(x, t, x_cond, language_embedding=language_embedding, padding_mask=padding_mask,mesh_condition=mesh_condition)
 
         if self.objective == 'pred_noise':
             target = noise
@@ -1355,7 +1390,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
         
         return loss.mean(), loss_object.mean(), loss_human.mean() 
 
-    def forward(self, x_start, ori_x_cond, cond_mask=None, padding_mask=None, \
+    def forward(self, x_start, ori_x_cond, cond_mask=None, padding_mask=None, mesh_condition=None, \
         language_input=None, contact_labels=None, rest_human_offsets=None, data_dict=None, ds=None): 
         # x_start: BS X T X D, we predict object motion 
         # (relative rotation matrix 9-dim with respect to the first frame, absolute translation 3-dim)
@@ -1363,9 +1398,10 @@ class ObjectCondGaussianDiffusion(nn.Module):
         # language_embedding: BS X D(512) 
         # contact_labels: BS X T 
         # rest_human_offsets: BS X 24 X 3
+    
         bs = x_start.shape[0] 
         t = torch.randint(0, self.num_timesteps, (bs,), device=x_start.device).long()
-
+      
         # (BPS representation) Encode object geometry to low dimensional vectors. 
         if ori_x_cond is not None:
             # x_cond = torch.cat((ori_x_cond[:, :, :3], self.bps_encoder(ori_x_cond[:, :, 3:])), dim=-1) # BS X 1 X (3+256) 
@@ -1375,7 +1411,7 @@ class ObjectCondGaussianDiffusion(nn.Module):
             x_cond = None 
 
         if cond_mask is not None:
-            x_pose_cond = x_start * (1. - cond_mask) 
+            x_pose_cond = x_start * (1. - cond_mask)   # x_pose_cond only 
             if x_cond is not None:
                 x_cond = torch.cat((x_cond, x_pose_cond), dim=-1) # BS X T X (3+256+3+9) 
             else:
@@ -1385,12 +1421,12 @@ class ObjectCondGaussianDiffusion(nn.Module):
             language_embedding = self.clip_encoder(language_input) # BS X d_model 
         else:
             language_embedding = None 
-
+  
         if self.use_object_keypoints:
             curr_loss, curr_loss_obj, curr_loss_human, curr_loss_feet, curr_loss_fk, curr_loss_obj_pts = \
                         self.p_losses(x_start, x_cond, t, \
                         language_embedding=language_embedding, padding_mask=padding_mask, \
-                        rest_human_offsets=rest_human_offsets, data_dict=data_dict, ds=ds)  
+                        rest_human_offsets=rest_human_offsets, data_dict=data_dict, ds=ds, mesh_condition=mesh_condition)  
 
             return curr_loss, curr_loss_obj, curr_loss_human, curr_loss_feet, curr_loss_fk, curr_loss_obj_pts 
         else:

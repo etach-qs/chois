@@ -1,15 +1,14 @@
 from datetime import datetime
 import numpy as np
 import torch
-from motion_loaders.dataset_motion_loader import get_dataset_motion_loader
+#from motion_loaders.dataset_motion_loader import get_dataset_motion_loader
 from motion_loaders.model_motion_loaders import get_motion_loader, get_motion_loader_for_chois_eval 
-from utils.get_opt import get_opt
 from utils.metrics import *
 from networks.evaluator_wrapper import EvaluatorModelWrapper
 from collections import OrderedDict
-from utils.plot_script import *
+# from utils.plot_script import *
 # from scripts.motion_process import *
-from utils import paramUtil
+# from utils import paramUtil
 from utils.utils import *
 
 from options.train_options import TrainTexMotMatchOptions
@@ -158,7 +157,7 @@ def evaluation(log_file):
                                    'FID': OrderedDict({}),
                                    'Diversity': OrderedDict({}),
                                    })
-        replication_times = 1 
+        replication_times = 5
         for replication in range(replication_times):
             motion_loaders = {}
             # mm_motion_loaders = {}
@@ -240,9 +239,9 @@ def evaluation(log_file):
                     print(line, file=f, flush=True)
 
 def check_vis(save_dir):
-    w_vectorizer = WordVectorizer('/move/u/jiamanli/github/text-to-motion/glove_840B', 'our_vab')
+    w_vectorizer = WordVectorizer('/ssd1/lishujia/chois_release/t2m_eval/CLaM/glove', 'our_vab')
 
-    data_root_folder = "/move/u/jiamanli/datasets/semantic_manip/processed_data"
+    data_root_folder = "/ailab/user/lishujia-hdd/chois_release/data/processed_data"
     val_dataset = CanoObjectTrajDataset(train=False, data_root_folder=data_root_folder, \
                 word_vectorizer=w_vectorizer) 
     
@@ -281,21 +280,25 @@ if __name__ == '__main__':
     # dataset_opt_path = './checkpoints/kit/Comp_v6_KLD005/opt.txt'
     # dataset_opt_path = './checkpoints/t2m/Comp_v6_KLD01/opt.txt'
     eval_motion_loaders = {
-        'CHOIS w classifier guidance': lambda: get_motion_loader_for_chois_eval(
-            '/move/u/jiamanli/eccv24_chois/res_npz_files_rebuttal/chois_perturb_mean',
-            batch_size,
-        ), 
+        # 'CHOIS w classifier guidance': lambda: get_motion_loader_for_chois_eval(
+        #     '/move/u/jiamanli/eccv24_chois/res_npz_files_rebuttal/chois_perturb_mean',
+        #     batch_size,
+        # ), 
 
-        'CHOIS w recon x0': lambda: get_motion_loader_for_chois_eval(
-            '/move/u/jiamanli/eccv24_chois/res_npz_files_rebuttal/chois_recon_guide_w_x0',
+        # 'CHOIS w recon x0': lambda: get_motion_loader_for_chois_eval(
+        #     '/move/u/jiamanli/eccv24_chois/res_npz_files_rebuttal/chois_recon_guide_w_x0',
+        #     batch_size,
+        # ), 
+
+        'CHOIS_mesh': lambda: get_motion_loader_for_chois_eval(
+            '/ssd1/lishujia/chois_release/chois_mesh_window_inter510_matrix/res_npz_files/chois',
             batch_size,
         ), 
 
         'CHOIS': lambda: get_motion_loader_for_chois_eval(
-            '/move/u/jiamanli/eccv24_chois/res_npz_files/chois',
+            '/ssd1/lishujia/chois_release/chois_single_window_results/res_npz_files/chois',
             batch_size,
         ), 
-
         # 'CHOIS w/o L_geo': lambda: get_motion_loader_for_chois_eval(
         #     '/move/u/jiamanli/eccv24_chois/res_npz_files/chois_wo_l_geo',
         #     batch_size,
@@ -385,7 +388,7 @@ if __name__ == '__main__':
     diversity_times = 300 
 
     gt_loader = get_motion_loader_for_chois_eval(
-            '/move/u/jiamanli/eccv24_chois/res_npz_files/gt',
+            '/ssd1/lishujia/chois_release/chois_result/res_npz_files/gt_train',
             batch_size)
     # gt_loader, gt_dataset = get_dataset_motion_loader(dataset_opt_path, batch_size, device)
     
@@ -399,7 +402,7 @@ if __name__ == '__main__':
     # wrapper_opt = get_opt(dataset_opt_path, device)
     eval_wrapper = EvaluatorModelWrapper(wrapper_opt)
 
-    log_file = './t2m_evaluation_chois_w_classifier_guidance.log'
+    log_file = './t2m_evaluation_chois.log'
     evaluation(log_file)
 
     # save_vis_folder = "/move/u/jiamanli/eccv2024_chois/check_fid_eval_res"

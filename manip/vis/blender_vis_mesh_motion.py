@@ -5,9 +5,9 @@ import imageio
 import numpy as np 
 import shutil 
 
-BLENDER_PATH = "blender-3.6.3-linux-x64/blender" # Put your blender path here 
-BLENDER_UTILS_ROOT_FOLDER = "chois_release/manip/vis" # Put the manip/vis folder absolute path here 
-BLENDER_SCENE_FOLDER = "./processed_data/blender_files" # Put the blender_files folder (where your store .blend files) absolute path here
+BLENDER_PATH = "/ailab/user/lishujia-hdd/blender-2.93.18-linux-x64/blender" # Put your blender path here 
+BLENDER_UTILS_ROOT_FOLDER = "/ssd1/lishujia/chois_release/manip/vis" # Put the manip/vis folder absolute path here 
+BLENDER_SCENE_FOLDER = "/ailab/user/lishujia-hdd/chois_release/data/processed_data/blender_files" # Put the blender_files folder (where your store .blend files) absolute path here
 
 def concat_multiple_videos(input_files, output_file):
     # List of input files
@@ -85,7 +85,7 @@ def run_blender_rendering_and_save2video(obj_folder_path, out_folder_path, out_v
     vid_folder = "/".join(out_vid_path.split("/")[:-1])
     if not os.path.exists(vid_folder):
         os.makedirs(vid_folder)
-
+ 
     if vis_object:
         if vis_human: # vis both human and object
             if vis_condition:

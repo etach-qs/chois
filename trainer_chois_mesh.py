@@ -272,7 +272,7 @@ class Trainer(object):
                 test_long_seq = True 
             else:
                 test_long_seq = False 
-  
+
             self.unseen_seq_ds = UnseenCanoObjectTrajDataset(train=False, \
                 data_root_folder=self.data_root_folder, \
                 window=opt.window, use_object_splits=self.use_object_split, \
@@ -362,18 +362,18 @@ class Trainer(object):
 
     def prep_dataloader(self, window_size):
         # Define dataset
-        train_dataset = CanoObjectTrajDataset(train=True, data_root_folder=self.data_root_folder, \
-            window=window_size, use_object_splits=self.use_object_split, \
-            input_language_condition=self.add_language_condition, \
-            use_random_frame_bps=self.use_random_frame_bps, \
-            use_object_keypoints=self.use_object_keypoints)
+        # train_dataset = CanoObjectTrajDataset(train=True, data_root_folder=self.data_root_folder, \
+        #     window=window_size, use_object_splits=self.use_object_split, \
+        #     input_language_condition=self.add_language_condition, \
+        #     use_random_frame_bps=self.use_random_frame_bps, \
+        #     use_object_keypoints=self.use_object_keypoints)
         val_dataset = CanoObjectTrajDataset(train=False, data_root_folder=self.data_root_folder, \
             window=window_size, use_object_splits=self.use_object_split, \
             input_language_condition=self.add_language_condition, \
             use_random_frame_bps=self.use_random_frame_bps, \
             use_object_keypoints=self.use_object_keypoints)
 
-        self.ds = train_dataset 
+        self.ds = val_dataset 
         self.val_ds = val_dataset
         self.dl = cycle(data.DataLoader(self.ds, batch_size=self.batch_size, \
             shuffle=True, pin_memory=True, num_workers=4))
@@ -1094,35 +1094,28 @@ class Trainer(object):
 
 
 
-            # curr_seq_name_tag = seq_name_list[0] + "_" + object_name_list[0]+ "_sidx_" + \
-            #             str(start_frame_idx_list[0].detach().cpu().numpy()) +\
-            #             "_eidx_" + str(end_frame_idx_list[0].detach().cpu().numpy()) + \
-            #             "_sample_cnt_" + str(0)
-            
-            
-            # tgt_path_list = ['sub16_whitechair_024_whitechair_sidx_0_eidx_119_sample_cnt_0','sub17_smalltable_007_smalltable_sidx_0_eidx_119_sample_cnt_0', \
-            #                  'sub17_suitcase_003_suitcase_sidx_0_eidx_119_sample_cnt_0','sub17_tripod_018_tripod_sidx_0_eidx_119_sample_cnt_0']
-            # if curr_seq_name_tag not in tgt_path_list:
-            #     continue
-            
-            
-            # if os.path.exists(os.path.join(dest_out_text_json_folder, curr_seq_name_tag+".json")):
-            #     print('continue')
-            #     continue
+            curr_seq_name_tag = seq_name_list[0] + "_" + object_name_list[0]+ "_sidx_" + \
+                        str(start_frame_idx_list[0].detach().cpu().numpy()) +\
+                        "_eidx_" + str(end_frame_idx_list[0].detach().cpu().numpy()) + \
+                        "_sample_cnt_" + str(0)
+
+            if os.path.exists(os.path.join(dest_out_text_json_folder, curr_seq_name_tag+".json")):
+                print('continue')
+                continue
 
 
             val_human_data = val_data_dict['motion'].cuda() 
             val_obj_data = val_data_dict['obj_motion'].cuda()
 
             obj_bps_data = val_data_dict['input_obj_bps'].cuda().reshape(-1, 1, 1024*3)
-            # human_mesh = val_data_dict['human_mesh']
-            # obj_mesh = val_data_dict['obj_mesh']
-            # mesh_condition = torch.cat([human_mesh, obj_mesh],dim=2)
-            # #indices = torch.linspace(0, human_mesh.shape[1] - 1, 5).long()  # 
-            # indices = torch.linspace(human_mesh.shape[1] / 6, human_mesh.shape[1] * 5 / 6, 5).long()
-            # mesh_condition = mesh_condition[:, indices, :, :].cuda()       
+            human_mesh = val_data_dict['human_mesh']
+            obj_mesh = val_data_dict['obj_mesh']
+            mesh_condition = torch.cat([human_mesh, obj_mesh],dim=2)
+            #indices = torch.linspace(0, human_mesh.shape[1] - 1, 5).long()  # 
+            indices = torch.linspace(human_mesh.shape[1] / 6, human_mesh.shape[1] * 5 / 6, 5).long()
+            mesh_condition = mesh_condition[:, indices, :, :].cuda()       
 
-            mesh_condition = None                 
+            # mesh_condition = None                 
             ori_data_cond = obj_bps_data # BS X 1 X (1024*3)
             rest_human_offsets = val_data_dict['rest_human_offsets'].cuda() # BS X 24 X 3 
             
@@ -1184,7 +1177,7 @@ class Trainer(object):
                             rest_human_offsets=rest_human_offsets, guidance_fn=guidance_fn, \
                             data_dict=val_data_dict, \
                             mesh_condition=mesh_condition)
-                pass
+                #pass
             else:
                 all_res_list = self.ema.ema_model.sample(data, ori_data_cond, \
                         cond_mask, padding_mask, \
@@ -1192,7 +1185,7 @@ class Trainer(object):
                         guidance_fn=guidance_fn, \
                         data_dict=val_data_dict, \
                         mesh_condition=mesh_condition)
-            pdb.set_trace()
+
             for_vis_gt_data = torch.cat((val_obj_data, val_human_data), dim=-1)
 
             sample_idx = 0
@@ -1225,13 +1218,13 @@ class Trainer(object):
             if self.use_object_keypoints:
                 all_res_list = all_res_list[:, :, :-4] 
 
-            gt_human_verts_list, gt_human_jnts_list, gt_human_trans_list, gt_human_rot_list, \
-            gt_obj_com_pos_list, gt_obj_rot_mat_list, gt_obj_verts_list, human_faces_list, obj_faces_list, _ = \
-            self.gen_vis_res_generic(for_vis_gt_data, val_data_dict, milestone, cond_mask, vis_gt=True, \
-            curr_object_name=object_name_list[0], vis_tag=vis_tag, \
-            dest_out_vid_path=curr_dest_out_gt_vid_path, \
-            dest_mesh_vis_folder=curr_dest_out_mesh_folder) 
-            # continue
+            # gt_human_verts_list, gt_human_jnts_list, gt_human_trans_list, gt_human_rot_list, \
+            # gt_obj_com_pos_list, gt_obj_rot_mat_list, gt_obj_verts_list, human_faces_list, obj_faces_list, _ = \
+            # self.gen_vis_res_generic(for_vis_gt_data, val_data_dict, milestone, cond_mask, vis_gt=True, \
+            # curr_object_name=object_name_list[0], vis_tag=vis_tag, \
+            # dest_out_vid_path=curr_dest_out_gt_vid_path, \
+            # dest_mesh_vis_folder=curr_dest_out_mesh_folder) 
+            #continue
             pred_human_verts_list, pred_human_jnts_list, pred_human_trans_list, pred_human_rot_list, \
             pred_obj_com_pos_list, pred_obj_rot_mat_list, pred_obj_verts_list, _, _, _ = \
             self.gen_vis_res_generic(all_res_list, val_data_dict, milestone, cond_mask, \
@@ -2643,7 +2636,7 @@ class Trainer(object):
             global_jpos = global_jpos + move_to_planned_path[:, :, None, :]
 
         global_root_jpos = global_jpos[:, :, 0, :].clone() # N X T X 3 
-    
+
         global_rot_6d = all_res_list[:, :, 3+9+24*3:3+9+24*3+22*6].reshape(num_seq, -1, 22, 6)
         global_rot_mat = transforms.rotation_6d_to_matrix(global_rot_6d) # N X T X 22 X 3 X 3 
 
@@ -2687,7 +2680,7 @@ class Trainer(object):
             mesh_jnts, mesh_verts, mesh_faces = \
                 run_smplx_model(root_trans[None].cuda(), curr_local_rot_aa_rep[None].cuda(), \
                 betas.cuda(), [gender], self.ds.bm_dict, return_joints24=True)
-            
+
             if self.test_unseen_objects:
                 # Get object verts 
                 obj_rest_verts, obj_mesh_faces = self.unseen_seq_ds.load_rest_pose_object_geometry(object_name)
@@ -2717,17 +2710,8 @@ class Trainer(object):
 
             human_mesh_faces_list.append(mesh_faces)
             obj_mesh_faces_list.append(obj_mesh_faces) 
-            
-            # save_verts = mesh_verts[0].detach().cpu().numpy()
-            # save_jnts = mesh_jnts[0].detach().cpu().numpy()
-            # key_indices = [20, 40, 60, 80, 100]
-    
-            # save_verts = save_verts[key_indices] - save_jnts[key_indices][:, 0][:, np.newaxis, :]
-     
-            # data_4save = {'human_verts':save_verts,'obj_name':str(data_dict['obj_name'][0])}
-            #np.savez(f"/ssd1/lishujia/object-popup/for_popup/{int(data_dict['index'].item()):04d}.npz",data_4save)
-            #continue
-
+         
+         
             if self.compute_metrics:
                 continue 
 
@@ -2789,7 +2773,7 @@ class Trainer(object):
             start_mesh_path = os.path.join(ball_mesh_save_folder, "start_object.ply")
             end_mesh_path = os.path.join(ball_mesh_save_folder, "end_object.ply") 
             self.export_to_mesh(start_object_mesh, obj_mesh_faces, start_mesh_path)
-          
+           
             if planned_waypoints_pos is not None:
                 if planned_path_floor_height is None:
                     num_waypoints = planned_waypoints_pos[idx].shape[0]
@@ -2855,7 +2839,7 @@ class Trainer(object):
                     save_verts_faces_to_mesh_file_w_object(mesh_verts.detach().cpu().numpy()[0][:seq_len[idx]], \
                             mesh_faces.detach().cpu().numpy(), \
                             obj_mesh_verts.detach().cpu().numpy()[:seq_len[idx]], obj_mesh_faces, mesh_save_folder)
-
+        
             # continue 
             if move_to_planned_path is not None:
                 curr_scene_name = planned_scene_names.split("/")[-4]

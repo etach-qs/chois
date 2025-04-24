@@ -1,5 +1,4 @@
 import sys
-sys.path.append("/viscam/u/jiamanli/github/scene_aware_manip")
 sys.path.append("../../")
 
 import os
@@ -31,6 +30,8 @@ def to_tensor(array, dtype=torch.float32):
     return array.to(dtype)
 
 
+
+
 class CHOISEvaluationDataset(Dataset):
     def __init__(
         self,
@@ -39,21 +40,49 @@ class CHOISEvaluationDataset(Dataset):
     ):
         self.res_npz_folder = res_npz_folder 
         self.window_data_dict = self.load_res_npz_files() 
-
+       
         self.w_vectorizer = word_vectorizer 
 
-        data_root_folder = "/move/u/jiamanli/datasets/semantic_manip/processed_data"
+        data_root_folder = "/ailab/user/lishujia-hdd/chois_release/data/processed_data"
         self.language_anno_folder = os.path.join(data_root_folder, "omomo_text_anno_txt_data") 
-     
+
         # For jpos mean, std
         mean_std_jpos_path = os.path.join(data_root_folder, "t2m_mean_std_jpos.p")
+
         if os.path.exists(mean_std_jpos_path):
             mean_std_dict = joblib.load(mean_std_jpos_path)
             jpos_mean, jpos_std = mean_std_dict['jpos_mean'], mean_std_dict['jpos_std'] 
+        else:
+            min_max_mean_std_jpos_data = self.extract_min_max_mean_std_from_data()
+            joblib.dump(min_max_mean_std_jpos_data, mean_std_jpos_path)
         
         self.mean_jpos = torch.from_numpy(jpos_mean).float() # 72  
         self.std_jpos = torch.from_numpy(jpos_std).float() # 72 
+    def extract_min_max_mean_std_from_data(self):
+        all_global_jpos_data = []
 
+
+
+        for s_idx in self.window_data_dict:
+            curr_window_data = self.window_data_dict[s_idx]['global_jpos'] # T X D 
+    
+            all_global_jpos_data.append(curr_window_data)
+           
+
+        all_global_jpos_data = np.vstack(all_global_jpos_data).reshape(-1, 72) # (N*T) X 72 
+ 
+
+    
+        min_jpos = all_global_jpos_data.min(axis=0)
+        max_jpos = all_global_jpos_data.max(axis=0)
+       
+
+        stats_dict = {}
+        stats_dict['jpos_mean'] = min_jpos 
+        stats_dict['jpos_std'] = max_jpos 
+      
+
+        return stats_dict 
     def load_res_npz_files(self):
         window_data_dict = {} 
         cnt = 0
@@ -67,7 +96,7 @@ class CHOISEvaluationDataset(Dataset):
             window_data_dict[cnt] = {} 
             window_data_dict[cnt]['global_jpos'] = npz_data['global_jpos'] # T X 24 X 3 
             window_data_dict[cnt]['seq_name'] = str(npz_data['seq_name'])
-
+            
             cnt += 1 
 
         return window_data_dict 
@@ -78,7 +107,7 @@ class CHOISEvaluationDataset(Dataset):
         # json_data = json.load(open(json_path, 'r'))
         
         # text_anno = json_data[seq_name]
-
+  
         # Load .txt file 
         txt_path = os.path.join(self.language_anno_folder, seq_name+".txt")
         with cs.open(txt_path) as f:

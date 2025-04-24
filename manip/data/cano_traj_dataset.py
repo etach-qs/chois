@@ -6,9 +6,10 @@ import numpy as np
 import joblib 
 import trimesh  
 import json 
-
+import pdb
 import random 
 
+from scipy.spatial import cKDTree
 import torch
 from torch.utils.data import Dataset
 
@@ -21,7 +22,7 @@ from human_body_prior.body_model.body_model import BodyModel
 
 from manip.lafan1.utils import rotate_at_frame_w_obj 
 
-SMPLH_PATH = "/viscam/u/jiamanli/github/hm_interaction/smpl_all_models/smplh_amass"
+SMPLH_PATH = "/ailab/user/lishujia-hdd/omomo_release/data/smpl_all_models/smplh"
 
 def to_tensor(array, dtype=torch.float32):
     if not torch.is_tensor(array):
@@ -175,7 +176,7 @@ class CanoObjectTrajDataset(Dataset):
             os.makedirs(dest_obj_bps_npy_folder)
         if not os.path.exists(dest_obj_bps_npy_folder_for_test):
             os.makedirs(dest_obj_bps_npy_folder_for_test)
-
+        
         if self.train:
             self.dest_obj_bps_npy_folder = dest_obj_bps_npy_folder 
         else:
@@ -185,29 +186,43 @@ class CanoObjectTrajDataset(Dataset):
             seq_data_path = os.path.join(data_root_folder, "train_diffusion_manip_seq_joints24.p")  
             processed_data_path = os.path.join(data_root_folder, \
                 "cano_train_diffusion_manip_window_"+str(self.window)+"_joints24.p")   
+           
         else:    
             seq_data_path = os.path.join(data_root_folder, "test_diffusion_manip_seq_joints24.p")
             processed_data_path = os.path.join(data_root_folder, \
                 "cano_test_diffusion_manip_window_"+str(self.window)+"_joints24.p")
+        
+        # if self.train:
+        #     dest_mesh_folder = os.path.join("/ssd1/lishujia/chois_release/mesh_cond_data2", "train", "merged_data_0.p")
+        # else:
+        #     dest_mesh_folder = os.path.join("/ssd1/lishujia/chois_release/mesh_cond_data2", "test", "merged_data.p")
+        # self.mesh_window_data_dict = joblib.load(dest_mesh_folder)
 
+        
         min_max_mean_std_data_path = os.path.join(data_root_folder, "cano_min_max_mean_std_data_window_"+str(self.window)+"_joints24.p")
         
         self.prep_bps_data()
+        # Prepare SMPLX model 
 
-        if os.path.exists(processed_data_path):
+    
+        if  os.path.exists(processed_data_path):
+            # self.data_dict = joblib.load(seq_data_path)
+            # self.cal_normalize_data_input()
             self.window_data_dict = joblib.load(processed_data_path)
-
+            #self.mesh_data_input()  
+            #joblib.dump(self.window_meshdata_dict, mesh_data_path)
+            #pdb.set_trace()
             # if not self.train:
                 # Mannually enable this. For testing data (discarded some testing sequences)
-                # self.get_bps_from_window_data_dict()
+            #self.get_bps_from_window_data_dict()
         else:
             self.data_dict = joblib.load(seq_data_path)
 
             self.extract_rest_pose_object_geometry_and_rotation()
 
             self.cal_normalize_data_input()
-            joblib.dump(self.window_data_dict, processed_data_path)            
-
+            #joblib.dump(self.window_data_dict, processed_data_path)            
+      
         if os.path.exists(min_max_mean_std_data_path):
             min_max_mean_std_jpos_data = joblib.load(min_max_mean_std_data_path)
         else:
@@ -267,7 +282,7 @@ class CanoObjectTrajDataset(Dataset):
         self.female_bm = self.female_bm.cuda()
         
         self.bm_dict = {'male' : self.male_bm, 'female' : self.female_bm}
-
+        
     def load_language_annotation(self, seq_name):
         # seq_name: sub16_clothesstand_000, etc. 
         json_path = os.path.join(self.language_anno_folder, seq_name+".json")
@@ -479,7 +494,7 @@ class CanoObjectTrajDataset(Dataset):
         #         # 'sbj': bps_sbj.cpu(),
         #     }
         #     torch.save(bps, self.bps_path)
-        
+   
         self.bps = torch.load(self.bps_path)
 
         self.bps_torch = bps_torch()
@@ -519,7 +534,6 @@ class CanoObjectTrajDataset(Dataset):
             # Skip vacuum, mop for now since they consist of two object parts. 
             if object_name in ["vacuum", "mop"]:
                 continue 
-
             rest_pose_obj_data = self.rest_pose_object_dict[object_name]
             rest_pose_rot_mat = rest_pose_obj_data['ori_rotation'] # 3 X 3
 
@@ -537,7 +551,7 @@ class CanoObjectTrajDataset(Dataset):
 
             rest_human_offsets = self.data_dict[index]['rest_offsets'] # 22 X 3/24 X 3
             trans2joint = self.data_dict[index]['trans2joint'] # 3 
-
+            
             # Used in old version without defining rest object geometry. 
             seq_obj_trans = self.data_dict[index]['obj_trans'][:, :, 0] # T X 3
             seq_obj_rot = self.data_dict[index]['obj_rot'] # T X 3 X 3 
@@ -586,7 +600,7 @@ class CanoObjectTrajDataset(Dataset):
                 new_local_rot_mat = transforms.quaternion_to_matrix(torch.from_numpy(Q[0]).float()) # T X J X 3 X 3 
                 new_local_aa_rep = transforms.matrix_to_axis_angle(new_local_rot_mat) # T X J X 3 
                 new_seq_root_orient = new_local_aa_rep[:, 0, :] # T X 3
-                new_seq_pose_body = new_local_aa_rep[:, 1:, :] # T X 21 X 3 
+                new_seq_pose_body = new_local_aa_rep[:, 1:, :] # T X 21 X 3  
                 
                 new_obj_rot_mat = transforms.quaternion_to_matrix(torch.from_numpy(new_obj_q[0]).float()) # T X 3 X 3
                 
@@ -605,7 +619,7 @@ class CanoObjectTrajDataset(Dataset):
                 # Compute BPS representation for this window
                 # Save to numpy file 
                 dest_obj_bps_npy_path = os.path.join(self.dest_obj_bps_npy_folder, seq_name+"_"+str(s_idx)+".npy")
-
+                
                 if not os.path.exists(dest_obj_bps_npy_path):
                     # object_bps = self.compute_object_geo_bps(obj_verts[0:1], center_verts[0:1]) # For the setting that only computes the first frame. 
                     object_bps = self.compute_object_geo_bps(obj_verts, center_verts) 
@@ -634,6 +648,190 @@ class CanoObjectTrajDataset(Dataset):
                 self.window_data_dict[s_idx]['window_obj_com_pos'] = query['window_obj_com_pos'].detach().cpu().numpy() 
 
                 self.window_data_dict[s_idx]['rest_human_offsets'] = rest_human_offsets 
+              
+                s_idx += 1 
+    def gen_mesh_res_generic(self, all_res_list, data_dict, move_to_planned_path=None,  curr_object_name=None, \
+                             test_unseen_objects=None):
+
+        # Prepare list used for evaluation. 
+        human_jnts_list = []
+        human_verts_list = [] 
+        obj_verts_list = [] 
+        trans_list = []
+        human_mesh_faces_list = []
+        obj_mesh_faces_list = [] 
+
+        # all_res_list: N X T X (3+9) 
+        num_seq = all_res_list.shape[0]
+
+        # N X T X 3 
+        pred_seq_com_pos = all_res_list[:, :, :3]
+      
+
+
+        pred_obj_rot_mat = all_res_list[:, :, 3:3+9].reshape(num_seq, -1, 3, 3) # N X T X 3 X 3
+            
+
+        num_joints = 24
+    
+        global_jpos = all_res_list[:, :, 3+9:3+9+num_joints*3].reshape(num_seq, -1, num_joints, 3)  # N X T X 22 X 3 
+
+        # For putting human into 3D scene 
+        if move_to_planned_path is not None:
+            pred_seq_com_pos = pred_seq_com_pos + move_to_planned_path
+            global_jpos = global_jpos + move_to_planned_path[:, :, None, :]
+
+        global_root_jpos = global_jpos[:, :, 0, :].clone() # N X T X 3 
+
+        global_rot_6d = all_res_list[:, :, 3+9+24*3:3+9+24*3+22*6].reshape(num_seq, -1, 22, 6)
+        global_rot_mat = transforms.rotation_6d_to_matrix(global_rot_6d) # N X T X 22 X 3 X 3 
+
+        trans2joint = data_dict['trans2joint'].to(all_res_list.device).squeeze(1) # BS X  3 
+        seq_len = data_dict['seq_len'] # BS, should only be used during for single window generation. 
+        if all_res_list.shape[0] != trans2joint.shape[0]:
+            trans2joint = trans2joint.repeat(num_seq, 1, 1) # N X 24 X 3 
+            seq_len = seq_len.repeat(num_seq) # N 
+        seq_len = seq_len.detach().cpu().numpy() # N 
+
+        for idx in range(num_seq):
+            curr_global_rot_mat = global_rot_mat[idx] # T X 22 X 3 X 3 
+            curr_local_rot_mat = quat_ik_torch(curr_global_rot_mat) # T X 22 X 3 X 3 
+            curr_local_rot_aa_rep = transforms.matrix_to_axis_angle(curr_local_rot_mat) # T X 22 X 3 
+            
+            curr_global_root_jpos = global_root_jpos[idx] # T X 3
+     
+            curr_trans2joint = trans2joint[idx:idx+1].clone() # 1 X 3 
+            
+            root_trans = curr_global_root_jpos + curr_trans2joint.to(curr_global_root_jpos.device) # T X 3 
+
+            # Generate global joint position 
+            bs = 1
+            betas = data_dict['betas'][0]
+            gender = data_dict['gender']
+            
+            curr_gt_obj_rot_mat = data_dict['obj_rot_mat'][0] # T X 3 X 3
+            curr_gt_obj_com_pos = data_dict['obj_com_pos'][0] # T X 3 
+            
+            curr_obj_rot_mat = pred_obj_rot_mat[idx] # T X 3 X 3 
+            curr_obj_quat = transforms.matrix_to_quaternion(curr_obj_rot_mat)
+            curr_obj_rot_mat = transforms.quaternion_to_matrix(curr_obj_quat) # Potentially avoid some prediction not satisfying rotation matrix requirements.
+
+            if curr_object_name is not None: 
+                object_name = curr_object_name 
+            else:
+                curr_seq_name = data_dict['seq_name'][0]
+                object_name = data_dict['obj_name'][0]
+          
+            # Get human verts 
+            from trainer_chois import run_smplx_model
+            mesh_jnts, mesh_verts, mesh_faces = \
+                run_smplx_model(root_trans[None].cuda(), curr_local_rot_aa_rep[None].cuda(), \
+                betas.cuda(), [gender], self.bm_dict, return_joints24=True)
+
+            if test_unseen_objects:
+                # Get object verts 
+                obj_rest_verts, obj_mesh_faces = self.unseen_seq_ds.load_rest_pose_object_geometry(object_name)
+                obj_rest_verts = torch.from_numpy(obj_rest_verts)
+
+                gt_obj_mesh_verts = self.unseen_seq_ds.load_object_geometry_w_rest_geo(curr_gt_obj_rot_mat, \
+                            curr_gt_obj_com_pos, obj_rest_verts.float())
+
+                obj_mesh_verts = self.unseen_seq_ds.load_object_geometry_w_rest_geo(curr_obj_rot_mat, \
+                            pred_seq_com_pos[idx], obj_rest_verts.float().to(pred_seq_com_pos.device))
+            else:
+                # Get object verts 
+                obj_rest_verts, obj_mesh_faces = self.load_rest_pose_object_geometry(object_name)
+                obj_rest_verts = torch.from_numpy(obj_rest_verts)
+
+                # gt_obj_mesh_verts = self.load_object_geometry_w_rest_geo(curr_gt_obj_rot_mat, \
+                #             curr_gt_obj_com_pos, obj_rest_verts.float())
+                obj_mesh_verts = self.load_object_geometry_w_rest_geo(curr_obj_rot_mat, \
+                            pred_seq_com_pos[idx], obj_rest_verts.float().to(pred_seq_com_pos.device))
+
+            actual_len = seq_len[idx]
+
+            human_jnts_list.append(mesh_jnts[0])
+            human_verts_list.append(mesh_verts[0]) 
+            obj_verts_list.append(obj_mesh_verts)
+            trans_list.append(root_trans) 
+
+            human_mesh_faces_list.append(mesh_faces)
+            obj_mesh_faces_list.append(obj_mesh_faces) 
+
+
+
+
+            return human_verts_list, human_mesh_faces_list, obj_verts_list, obj_mesh_faces_list
+    def mesh_data_input(self):
+        
+        s_idx = 0 
+        
+        for index in self.data_dict:
+
+            seq_name = self.data_dict[index]['seq_name']
+
+            object_name = seq_name.split("_")[1]
+
+            # Skip vacuum, mop for now since they consist of two object parts. 
+            if object_name in ["vacuum", "mop"]:
+                continue 
+
+            seq_root_trans = self.data_dict[index]['trans'] # T X 3 
+           
+
+            num_steps = seq_root_trans.shape[0]
+            # for start_t_idx in range(0, num_steps, self.window//2):
+            for start_t_idx in range(0, num_steps, self.window//4):
+
+                
+                end_t_idx = start_t_idx + self.window - 1
+                
+                # Skip the segment that has a length < 30 
+                if end_t_idx - start_t_idx < 30:
+                    continue 
+                # if os.path.exists('/ssd1/lishujia/chois_release/mesh_cond_data/train/'+ str(s_idx).zfill(5)+'.npz'):
+                #     s_idx += 1
+                #     print('continue')
+                #     continue
+
+                
+               
+
+                
+                #print(s_idx)
+                val_human_data = torch.from_numpy(self.window_data_dict[s_idx]['motion']).float().cuda() 
+                length = val_human_data.shape[0]
+                
+                val_obj_data = torch.cat((torch.from_numpy(self.window_data_dict[s_idx]['window_obj_com_pos'][:length]).float().cuda() ,torch.from_numpy(self.window_data_dict[s_idx]['obj_rot_mat'][:length].reshape(-1, 9)).float().cuda()),dim=-1)
+                val_human_data = val_human_data.repeat(1,1,1)
+                val_obj_data = val_obj_data.repeat(1,1,1)
+                
+                all_res_list = torch.cat((val_human_data, val_obj_data),dim=-1)
+                data_dict = {}
+                device = torch.device("cuda")  # 
+
+                data_dict = {
+                    'trans2joint': torch.tensor(self.window_data_dict[s_idx]['trans2joint'], dtype=torch.float32, device=device).unsqueeze(0),
+                    'seq_len': torch.tensor([self.window_data_dict[s_idx]['motion'].shape[0]], dtype=torch.int32, device=device),  # 转为张量并增加维度
+                    'betas': torch.tensor(self.window_data_dict[s_idx]['betas'], dtype=torch.float32, device=device).unsqueeze(0) if isinstance(self.window_data_dict[s_idx]['betas'], np.ndarray) else self.window_data_dict[s_idx]['betas'],
+                    'gender': self.window_data_dict[s_idx]['gender'],  # 
+                    'obj_rot_mat': torch.tensor(self.window_data_dict[s_idx]['obj_rot_mat'], dtype=torch.float32, device=device).unsqueeze(0),
+                    'obj_com_pos': torch.tensor(self.window_data_dict[s_idx]['window_obj_com_pos'], dtype=torch.float32, device=device).unsqueeze(0),
+                }
+                
+                gt_human_verts_list,human_faces_list,gt_obj_verts_list,obj_faces_list = \
+            self.gen_vis_res_generic(all_res_list, data_dict, move_to_planned_path=None,  curr_object_name=self.window_data_dict[s_idx]['seq_name'].split('_')[1])
+                mesh_dict = {
+                    'human': gt_human_verts_list[0].detach().cpu().numpy(),  # T X Nv_human X 3
+                    'human_faces': human_faces_list[0].detach().cpu().numpy(),  # Nf_human X 3
+                    'object': gt_obj_verts_list[0].detach().cpu().numpy(),  # T X Nv_object X 3
+                    'object_faces': obj_faces_list[0]  # Nf_object X 3
+    }
+                #self.window_meshdata_dict[s_idx] = mesh_dict
+                if self.train:
+                    np.savez('/ssd1/lishujia/chois_release/mesh_cond_data/train/'+ str(s_idx).zfill(5)+'.npz',**mesh_dict)
+                else:
+                    np.savez('/ssd1/lishujia/chois_release/mesh_cond_data/test/'+ str(s_idx).zfill(5)+'.npz',**mesh_dict)
 
                 s_idx += 1 
        
@@ -862,7 +1060,7 @@ class CanoObjectTrajDataset(Dataset):
         trans2joint = self.window_data_dict[index]['trans2joint'] 
 
         rest_human_offsets = self.window_data_dict[index]['rest_human_offsets']  
-
+       
         if self.use_random_frame_bps:
             if (not self.train) or self.use_object_splits or self.input_language_condition:
                 ori_w_idx = self.window_data_dict[index]['ori_w_idx']
@@ -871,9 +1069,9 @@ class CanoObjectTrajDataset(Dataset):
                 obj_bps_npy_path = os.path.join(self.dest_obj_bps_npy_folder, seq_name+"_"+str(index)+".npy") 
         else:
             obj_bps_npy_path = os.path.join(self.rest_object_geo_folder, object_name+".npy")
-
+        
         obj_bps_data = np.load(obj_bps_npy_path) # T X N X 3 
-
+        
         if self.use_random_frame_bps:
             random_sampled_t_idx = random.sample(list(range(obj_bps_data.shape[0])), 1)[0]
             obj_bps_data = obj_bps_data[random_sampled_t_idx:random_sampled_t_idx+1] # 1 X N X 3  
@@ -1010,7 +1208,226 @@ class CanoObjectTrajDataset(Dataset):
         if self.use_object_keypoints:
             data_input_dict['ori_obj_keypoints'] = paded_transformed_obj_nn_pts # T X K X 3 
             data_input_dict['rest_pose_obj_pts'] = rest_pose_obj_nn_pts # K X 3 
+        
+        
+        # if self.train:
+        #     mesh_path = '/ssd1/lishujia/chois_release/mesh_cond_data2/train/'+ str(index).zfill(5)+'.npz'
+        # else:
+        #     mesh_path = '/ssd1/lishujia/chois_release/mesh_cond_data2/test/'+ str(index).zfill(5)+'.npz'
+        # mesh_data = np.load(mesh_path)
+        # data_input_dict['human_mesh'] = torch.from_numpy(mesh_data['human_mesh']).float()
+        # # data_input_dict['human_mesh'] = torch.from_numpy(self.mesh_window_data_dict[index]['human_mesh'])
+        # data_input_dict['obj_mesh'] = torch.from_numpy(mesh_data['obj_mesh']).float()
+        
+    #     """
+    #     get the human and object mesh sequence 
+    #     """
+    #          # Get the body model based on gender
+    #     bm = self.bm_dict[data_input_dict['gender']]
+    #     # Extract joint rotations and positions from motion data
+        
+    #     global_jpos = data_input_dict['motion'][:, :24*3].reshape(-1, 24, 3)  # T X 24 X 3
+    #     global_rot_6d = data_input_dict['motion'][:, 24*3:].reshape(-1, 22, 6)  # T X 22 X 6
 
+    #     # Convert 6D rotation to rotation matrices
+    #     global_rot_mat = transforms.rotation_6d_to_matrix(global_rot_6d)  # T X 22 X 3 X 3
+
+    #     # Convert rotation matrices to axis-angle representation
+    #     global_rot_aa = transforms.matrix_to_axis_angle(global_rot_mat)  # T X 22 X 3
+
+    #     # Split into body pose and root orientation
+    #     root_orient = global_rot_aa[:, 0, :]  # T X 3 (root orientation in axis-angle)
+    #     body_pose = global_rot_aa[:, 1:, :]  # T X 21 X 3 (body pose in axis-angle)
+    #     trans = global_jpos[:, 0, :]  # T X 3
+    #     # Prepare hand pose (if available)
+    #     # Assuming hand_pose is in rotation6d format, convert it to axis-angle
+    #     if 'hand_pose' in data_input_dict:
+    #         hand_rot_6d = data_input_dict['hand_pose']  # T X 30 X 6
+    #         hand_rot_mat = transforms.rotation_6d_to_matrix(hand_rot_6d)  # T X 30 X 3 X 3
+    #         hand_pose = transforms.matrix_to_axis_angle(hand_rot_mat)  # T X 30 X 3
+    #     else:
+    #         hand_pose = torch.zeros((global_rot_aa.shape[0], 30, 3))  # T X 30 X 3 (default zero hand pose)
+
+    #     # Get human mesh
+    #     human_mesh = bm(
+    #         betas=torch.from_numpy(data_input_dict['betas']).float().cuda().repeat(trans.shape[0], 1),
+    #         body_pose=body_pose.cuda(),
+    #         left_hand_pose=hand_pose[:,:15].cuda(),
+    #         right_hand_pose=hand_pose[:,15:].cuda(),
+    #         root_orient=root_orient.cuda(),
+    #         trans=trans.cuda()
+    #     ).v  # T X Nv X 3
+
+     
+        
+    #     smpl_faces = bm.f
+
+    #     # Load rest pose object geometry
+    #     object_name = data_input_dict['obj_name']
+    #     rest_verts, object_faces = self.load_rest_pose_object_geometry(object_name)  # Nv X 3
+
+    #     # Transform rest pose vertices to current frame
+    #     obj_rot_mat = data_input_dict['obj_rot_mat']  # T X 3 X 3
+    #     obj_com_pos = data_input_dict['obj_com_pos']  # T X 3
+      
+    #     rest_verts = torch.from_numpy(rest_verts).float()  # Convert to PyTorch tensor
+    #     rest_verts = rest_verts.repeat(obj_rot_mat.shape[0], 1, 1)  # T X Nv X 3
+    #     object_mesh = torch.matmul(obj_rot_mat, rest_verts.transpose(1, 2)).transpose(1, 2) + obj_com_pos[:, None, :]  # T X Nv X 3
+    #     combined_mesh = {
+    #      'human': human_mesh,  # T X Nv_human X 3
+    #      'human_faces': smpl_faces,  # T X Nf_human X 3
+    #      'object': object_mesh,  # T X Nv_object X 3
+    #      'object_faces': object_faces  # T X Nf_object X 3
+    #  }
+    #     return combined_mesh
+   
         return data_input_dict 
         # data_input_dict['motion']: T X (22*3+22*6) range [-1, 1]
         # data_input_dict['obj_bps]: T X N X 3 
+def load_rest_pose_object_geometry(rest_obj_path, object_name):
+    rest_obj_path = os.path.join(rest_obj_path, object_name+".ply")
+        
+    mesh = trimesh.load_mesh(rest_obj_path)
+    rest_verts = np.asarray(mesh.vertices) # Nv X 3
+    obj_mesh_faces = np.asarray(mesh.faces) # Nf X 3
+
+    return rest_verts, obj_mesh_faces 
+def farthest_point_sampling(points, num_samples):
+
+    fpoints = points.shape[0]
+    sampled_indices = np.zeros(num_samples, dtype=np.int32)  # 记录采样的索引
+    distances = np.full(fpoints, np.inf)  # 初始化所有点到采样集合的最短距离
+
+    # 1. 随机选择第一个点
+    sampled_indices[0] = np.random.randint(fpoints)
+    for i in range(1, num_samples):
+        # 2. 计算所有点到当前采样集合的最小距离
+        dist_to_last_sampled = np.linalg.norm(points - points[sampled_indices[i-1]], axis=1)
+        distances = np.minimum(distances, dist_to_last_sampled)
+        
+        # 3. 选择最远的点
+        sampled_indices[i] = np.argmax(distances)
+
+    # 4. 获取采样点
+    sampled_points = points[sampled_indices]
+    return sampled_points, sampled_indices
+
+
+def sample_human_points_near_object(obj_mesh_verts, human_mesh_verts, num_samples=1000):
+    """
+    Samples 3000 closest points from human_mesh_verts to obj_mesh_verts for each frame.
+    
+    Parameters:
+        obj_mesh_verts: numpy array of shape [frame, 1500, 3] (object point cloud per frame)
+        human_mesh_verts: numpy array of shape [frame, numpoints, 3] (human point cloud per frame)
+        num_samples: int, number of human points to sample per frame
+    
+    Returns:
+        sampled_human_points: numpy array of shape [frame, num_samples, 3]
+    """
+    num_frames = obj_mesh_verts.shape[0]
+    sampled_human_points = np.zeros((num_frames, num_samples, 3))
+
+    for i in range(num_frames):
+        # Build KDTree for object mesh vertices
+        obj_tree = cKDTree(obj_mesh_verts[i])  
+
+        # Query nearest distances for each human vertex
+        distances, _ = obj_tree.query(human_mesh_verts[i])
+
+        # Get indices of the 3000 closest human points
+        closest_indices = np.argsort(distances)[:num_samples]
+
+        # Store the sampled points
+        sampled_human_points[i] = human_mesh_verts[i][closest_indices]
+
+    return sampled_human_points
+
+if __name__ == "__main__":
+
+    res_obj_geo_folder = '/ailab/user/lishujia-hdd/chois_release/data/processed_data/rest_object_geo'
+    ori_folder = "/ssd1/lishujia/chois_release/mesh_cond_data/train"
+    ori_folder_human = "/ssd1/lishujia/chois_release/mesh_cond_data1/train"
+    tgt_folder = "/ssd1/lishujia/chois_release/mesh_cond_data2/train"
+    obj_name_dict = joblib.load('/ssd1/lishujia/chois_release/mesh_cond_data1/train_objname_index.p')
+    # def process_file(file):
+    #     file_path = os.path.join(ori_folder, file)
+    #     human_path = os.path.join(ori_folder_human, file)
+    #     target_path = os.path.join(tgt_folder, file)
+        
+    #     if os.path.exists(target_path):
+    #         print('return')
+    #         return  # 目标文件已存在，跳过
+
+    #     mesh_dict = np.load(file_path)  # 读取数据
+    #     mesh_dict_human = np.load(human_path)
+    #     obj_verts = mesh_dict['obj_mesh']
+    #     human_verts = mesh_dict_human['human_mesh']
+        
+    #     index = int(file.split('.')[0])
+    #     if index not in obj_name_dict:
+    #         print(f"Warning: index {index} not found in obj_name_dict")
+    #         return
+        
+    #     obj_name = obj_name_dict[index]
+    #     sampled_index = np.load(os.path.join(res_obj_geo_folder, obj_name + '_500_indices.npy'))
+        
+    #     if np.max(sampled_index) >= obj_verts.shape[1]:
+    #         print(f"Error: sampled_index out-of-bounds for {file}")
+    #         return
+        
+    #     obj_sampled_verts = obj_verts[:, sampled_index]  # 采样物体点云
+    #     sampled_human_verts = sample_human_points_near_object(obj_sampled_verts, human_verts)  # 采样人体点云
+       
+    #     # 存储
+    #     np.savez(target_path, obj_mesh=obj_sampled_verts, human_mesh=sampled_human_verts)
+    #     print(f"Processed: {file}")
+    
+    # #data = np.load('/ssd1/lishujia/chois_release/mesh_cond_data2/test/00000.npz')
+    # #pdb.set_trace()
+    # from multiprocess import Pool
+    # num_workers = min(32, os.cpu_count())  # 限制最大并发数
+    # with Pool(num_workers) as p:
+    #     p.map(process_file, os.listdir(ori_folder))
+    # for file in os.listdir(ori_folder):
+    #     if os.path.exists(os.path.join(tgt_folder,file)):
+    #         print('continue')
+    #         continue
+    #     sampled_data_dict = dict()
+    #     mesh_dict = np.load(os.path.join(ori_folder, file))
+    #     obj_verts = mesh_dict['obj_mesh']
+    #     index = int(file.split('.')[0])
+    #     obj_name = obj_name_dict[index]
+    #     sampled_index = np.load(os.path.join(res_obj_geo_folder,obj_name+'_500_indices.npy'))
+        
+    #     obj_sampled_verts = obj_verts[:,sampled_index]
+        
+    #     human_verts = mesh_dict['human_mesh']
+    #     sampled_human_verts = sample_human_points_near_object(obj_sampled_verts, human_verts)
+
+
+    #     sampled_data_dict['obj_mesh'] = obj_sampled_verts
+    #     sampled_data_dict['human_mesh'] = sampled_human_verts
+    #     np.savez(os.path.join(tgt_folder,file),**sampled_data_dict)
+    #     print(file)
+    # obj_name_list = set()
+    # for filename in os.listdir(res_obj_geo_folder):
+    #     if filename.endswith('indices.npy'):
+    #         continue
+    #     obj_name = filename.split('.')[0]
+        
+    #     obj_name_list.add(obj_name)
+    # pdb.set_trace()
+    # for name in obj_name_list:
+    #     rest_verts, obj_mesh_faces = load_rest_pose_object_geometry(res_obj_geo_folder, name)
+    #     sampled_points, sampled_indices = farthest_point_sampling(rest_verts, 500)
+    #     np.save(os.path.join(res_obj_geo_folder,name+'_500_indices.npy'), sampled_indices)
+    data_root_folder = '/ailab/user/lishujia-hdd/chois_release/data/processed_data'
+    dataset = CanoObjectTrajDataset(train=True, use_random_frame_bps=True, use_object_keypoints=True, data_root_folder=data_root_folder)
+    print(len(dataset))
+    for i in range(len(dataset)):
+        print(i)
+        data_input_dict = dataset[i]
+    pdb.set_trace()
+
+

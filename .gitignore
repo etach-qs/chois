@@ -24,3 +24,4 @@ core
 *.mkv
 *.rrd
 *.nfs*
+*.tar

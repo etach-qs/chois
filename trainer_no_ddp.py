@@ -5,13 +5,14 @@ import yaml
 import random 
 import json 
 import copy 
-import pdb
+
 import trimesh 
 
 from matplotlib import pyplot as plt
 from pathlib import Path
-import joblib
+
 import wandb
+
 import torch
 from torch.optim import Adam
 from torch.cuda.amp import autocast, GradScaler
@@ -181,16 +182,16 @@ class Trainer(object):
         amp=False,
         step_start_ema=2000,
         ema_update_every=10,
-        save_and_sample_every=5000,
+        save_and_sample_every=40000,
         results_folder='./results',
-        use_wandb=False,   
+        use_wandb=True,   
     ):
         super().__init__()
 
         self.use_wandb = use_wandb           
         if self.use_wandb:
             # Loggers
-            wandb.init(config=opt, project=opt.wandb_pj_name, \
+            wandb.init(config=opt, project=opt.wandb_pj_name, entity=opt.entity, \
             name=opt.exp_name, dir=opt.save_dir)
 
         self.model = diffusion_model
@@ -272,7 +273,7 @@ class Trainer(object):
                 test_long_seq = True 
             else:
                 test_long_seq = False 
-  
+
             self.unseen_seq_ds = UnseenCanoObjectTrajDataset(train=False, \
                 data_root_folder=self.data_root_folder, \
                 window=opt.window, use_object_splits=self.use_object_split, \
@@ -457,9 +458,6 @@ class Trainer(object):
         return mask 
 
     def train(self):
-        pretrained_path = '/ssd1/lishujia/chois_release/chois_release_object_split/chois_window_120_set0116_mesh_12/weights/model-11.pt'
-
-        self.load(milestone=11, pretrained_path=pretrained_path)
         init_step = self.step 
         for idx in range(init_step, self.train_num_steps):
             self.optimizer.zero_grad()
@@ -472,17 +470,9 @@ class Trainer(object):
                 obj_data = data_dict['obj_motion'].cuda() # BS X T X (3+9) 
 
                 obj_bps_data = data_dict['input_obj_bps'].cuda().reshape(-1, 1, 1024*3) # BS X 1 X 1024 X 3 -> BS X 1 X (1024*3) 
-                rest_human_offsets = data_dict['rest_human_offsets'].cuda() # BS X 24 X 3 
                 
-                human_mesh = data_dict['human_mesh']
-                obj_mesh = data_dict['obj_mesh']
+                rest_human_offsets = data_dict['rest_human_offsets'].cuda() # BS X 24 X 3 
 
-                mesh_condition = torch.cat([human_mesh, obj_mesh],dim=2)
-                # indices = torch.linspace(0, human_mesh.shape[1] - 1, 5).long()  # 
-                indices = torch.linspace(human_mesh.shape[1] / 6, human_mesh.shape[1] * 5 / 6, 5).long()
-
-                mesh_condition = mesh_condition[:, indices, :, :].cuda()
-                #mesh_condition = None
                 ori_data_cond = obj_bps_data # BS X 1 X (1024*3) 
 
                 # Generate padding mask 
@@ -497,6 +487,7 @@ class Trainer(object):
                 
                 cond_mask = self.prep_mimic_A_star_path_condition_mask_pos_xy_only(obj_data, data_dict['seq_len'])
                 cond_mask = end_pos_cond_mask * cond_mask 
+              
                 # Add the first human pose as input condition 
                 human_cond_mask = torch.ones_like(human_data).to(human_data.device)
                 if self.input_first_human_pose:
@@ -519,8 +510,7 @@ class Trainer(object):
                         loss_diffusion, loss_obj, loss_human, loss_feet, loss_fk, loss_obj_pts = \
                         self.model(data, ori_data_cond, cond_mask, padding_mask, \
                         language_input=language_input, \
-                        rest_human_offsets=rest_human_offsets, ds=self.ds, data_dict=data_dict, \
-                            mesh_condition = mesh_condition)
+                        rest_human_offsets=rest_human_offsets, ds=self.ds, data_dict=data_dict)
                     else:
                         loss_diffusion = self.model(data, ori_data_cond, cond_mask, padding_mask, \
                         rest_human_offsets=rest_human_offsets)
@@ -586,7 +576,7 @@ class Trainer(object):
 
             self.ema.update()
 
-            if self.step != 0 and self.step % 1000 == 0:
+            if self.step != 0 and self.step % 10 == 0:
                 self.ema.ema_model.eval()
 
                 with torch.no_grad():
@@ -597,16 +587,9 @@ class Trainer(object):
                     obj_bps_data = val_data_dict['input_obj_bps'].cuda().reshape(-1, 1, 1024*3)
                    
                     ori_data_cond = obj_bps_data 
+
                     rest_human_offsets = val_data_dict['rest_human_offsets'].cuda() # BS X 24 X 3 
-                    human_mesh = val_data_dict['human_mesh']
-                    obj_mesh = val_data_dict['obj_mesh']
 
-                    mesh_condition = torch.cat([human_mesh, obj_mesh],dim=2)
-                    # indices = torch.linspace(0, human_mesh.shape[1] - 1, 5).long()  # 
-                    indices = torch.linspace(human_mesh.shape[1] / 6, human_mesh.shape[1] * 5 / 6, 5).long()
-
-                    mesh_condition = mesh_condition[:, indices, :, :].cuda()
-                    # mesh_condition = None
                     # Generate padding mask 
                     actual_seq_len = val_data_dict['seq_len'] + 1 # BS, + 1 since we need additional timestep for noise level 
                     tmp_mask = torch.arange(self.window+1).expand(val_obj_data.shape[0], \
@@ -639,8 +622,7 @@ class Trainer(object):
                                         self.model(data, ori_data_cond, cond_mask, padding_mask, \
                                         language_input=language_input, \
                                         rest_human_offsets=rest_human_offsets, \
-                                        ds=self.val_ds, data_dict=val_data_dict, \
-                                        mesh_condition=mesh_condition)
+                                        ds=self.val_ds, data_dict=val_data_dict)
                       
                     else:
                         val_loss_diffusion = self.model(data, ori_data_cond, cond_mask, padding_mask, \
@@ -670,8 +652,7 @@ class Trainer(object):
                         if self.add_language_condition:
                             all_res_list = self.ema.ema_model.sample(data, ori_data_cond, cond_mask, padding_mask, \
                                         language_input=language_input, \
-                                        rest_human_offsets=rest_human_offsets, \
-                                        mesh_condition=mesh_condition)
+                                        rest_human_offsets=rest_human_offsets)
                         else:
                             all_res_list = self.ema.ema_model.sample(data, ori_data_cond, cond_mask, padding_mask, \
                                         rest_human_offsets=rest_human_offsets)
@@ -681,8 +662,8 @@ class Trainer(object):
                         all_res_list = all_res_list[:, :, :-4] 
                         cond_mask = cond_mask[:, :, :-4]
 
-                        # self.gen_vis_res(for_vis_gt_data, val_data_dict, self.step, cond_mask, vis_gt=True)
-                        # self.gen_vis_res(all_res_list, val_data_dict, self.step, cond_mask)
+                        self.gen_vis_res(for_vis_gt_data, val_data_dict, self.step, cond_mask, vis_gt=True)
+                        self.gen_vis_res(all_res_list, val_data_dict, self.step, cond_mask)
 
             self.step += 1
        
@@ -1092,38 +1073,12 @@ class Trainer(object):
             start_frame_idx_list = val_data_dict['s_idx']
             end_frame_idx_list = val_data_dict['e_idx'] 
 
-
-
-            # curr_seq_name_tag = seq_name_list[0] + "_" + object_name_list[0]+ "_sidx_" + \
-            #             str(start_frame_idx_list[0].detach().cpu().numpy()) +\
-            #             "_eidx_" + str(end_frame_idx_list[0].detach().cpu().numpy()) + \
-            #             "_sample_cnt_" + str(0)
-            
-            
-            # tgt_path_list = ['sub16_whitechair_024_whitechair_sidx_0_eidx_119_sample_cnt_0','sub17_smalltable_007_smalltable_sidx_0_eidx_119_sample_cnt_0', \
-            #                  'sub17_suitcase_003_suitcase_sidx_0_eidx_119_sample_cnt_0','sub17_tripod_018_tripod_sidx_0_eidx_119_sample_cnt_0']
-            # if curr_seq_name_tag not in tgt_path_list:
-            #     continue
-            
-            
-            # if os.path.exists(os.path.join(dest_out_text_json_folder, curr_seq_name_tag+".json")):
-            #     print('continue')
-            #     continue
-
-
             val_human_data = val_data_dict['motion'].cuda() 
             val_obj_data = val_data_dict['obj_motion'].cuda()
 
             obj_bps_data = val_data_dict['input_obj_bps'].cuda().reshape(-1, 1, 1024*3)
-            # human_mesh = val_data_dict['human_mesh']
-            # obj_mesh = val_data_dict['obj_mesh']
-            # mesh_condition = torch.cat([human_mesh, obj_mesh],dim=2)
-            # #indices = torch.linspace(0, human_mesh.shape[1] - 1, 5).long()  # 
-            # indices = torch.linspace(human_mesh.shape[1] / 6, human_mesh.shape[1] * 5 / 6, 5).long()
-            # mesh_condition = mesh_condition[:, indices, :, :].cuda()       
+            ori_data_cond = obj_bps_data # BS X 1 X (1024*3) 
 
-            mesh_condition = None                 
-            ori_data_cond = obj_bps_data # BS X 1 X (1024*3)
             rest_human_offsets = val_data_dict['rest_human_offsets'].cuda() # BS X 24 X 3 
             
             if "contact_labels" in val_data_dict:
@@ -1182,17 +1137,14 @@ class Trainer(object):
                 all_res_list = self.ema.ema_model.sample(data, ori_data_cond, cond_mask, padding_mask, \
                             language_input=language_input, \
                             rest_human_offsets=rest_human_offsets, guidance_fn=guidance_fn, \
-                            data_dict=val_data_dict, \
-                            mesh_condition=mesh_condition)
-                pass
+                            data_dict=val_data_dict)
             else:
                 all_res_list = self.ema.ema_model.sample(data, ori_data_cond, \
                         cond_mask, padding_mask, \
                         rest_human_offsets=rest_human_offsets, \
                         guidance_fn=guidance_fn, \
-                        data_dict=val_data_dict, \
-                        mesh_condition=mesh_condition)
-            pdb.set_trace()
+                        data_dict=val_data_dict)
+
             for_vis_gt_data = torch.cat((val_obj_data, val_human_data), dim=-1)
 
             sample_idx = 0
@@ -1231,13 +1183,13 @@ class Trainer(object):
             curr_object_name=object_name_list[0], vis_tag=vis_tag, \
             dest_out_vid_path=curr_dest_out_gt_vid_path, \
             dest_mesh_vis_folder=curr_dest_out_mesh_folder) 
-            # continue
+           
             pred_human_verts_list, pred_human_jnts_list, pred_human_trans_list, pred_human_rot_list, \
             pred_obj_com_pos_list, pred_obj_rot_mat_list, pred_obj_verts_list, _, _, _ = \
             self.gen_vis_res_generic(all_res_list, val_data_dict, milestone, cond_mask, \
             curr_object_name=object_name_list[0], vis_tag=vis_tag, \
             dest_out_vid_path=curr_dest_out_vid_path, dest_mesh_vis_folder=curr_dest_out_mesh_folder)
-            continue
+
             # Save results to npz files
             # Save global joint positions to npz files for evaluation (R_precition, FID, etc)
             # tmp_bs = val_obj_data.shape[0]
@@ -2266,7 +2218,7 @@ class Trainer(object):
 
             if object_name_list[0] not in object_test_seq_dict:
                 continue 
-           
+
             # planned_paths_list, text_list, end_frame_height_range_list = \
             #         self.get_long_planned_path_names() 
             planned_paths_list = object_test_seq_dict[object_name_list[0]]['npy_list']
@@ -2311,15 +2263,6 @@ class Trainer(object):
                 val_human_data = val_data_dict['motion'].cuda() 
                 val_normalized_obj_data = val_data_dict['obj_motion'].cuda() # Only need the first frame. 
                 val_ori_obj_data = val_data_dict['ori_obj_motion'].cuda() # BS X T X (3+9)
-                
-                human_mesh = val_data_dict['human_mesh']
-                obj_mesh = val_data_dict['obj_mesh']
-                mesh_condition = torch.cat([human_mesh, obj_mesh],dim=2)
-                #indices = torch.linspace(0, human_mesh.shape[1] - 1, 5).long()  # 
-                indices = torch.linspace(human_mesh.shape[1] / 6, human_mesh.shape[1] * 5 / 6, 5).long()
-                mesh_condition = mesh_condition[:, indices, :, :].cuda() 
-
-
 
                 start_obj_com_pos = val_ori_obj_data[:, 0:1, :3] # BS X 1 X 3 
                 move2aligned_planned_path = start_obj_pos_on_planned_path[None].to(start_obj_com_pos.device) - \
@@ -2453,8 +2396,7 @@ class Trainer(object):
                             input_waypoints=True, language_input=text_clip_feats_list, \
                             contact_labels=contact_labels, \
                             rest_human_offsets=rest_human_offsets, guidance_fn=guidance_fn, \
-                            data_dict=val_data_dict, \
-                            mesh_condition = mesh_condition)
+                            data_dict=val_data_dict)
                     
                     # vis_tag = str(milestone)+"_final_long_seq_w_planned_waypoints_"+"_sidx_"+str(s_idx)+"_sample_cnt_"+str(sample_idx)
                     
@@ -2643,7 +2585,7 @@ class Trainer(object):
             global_jpos = global_jpos + move_to_planned_path[:, :, None, :]
 
         global_root_jpos = global_jpos[:, :, 0, :].clone() # N X T X 3 
-    
+
         global_rot_6d = all_res_list[:, :, 3+9+24*3:3+9+24*3+22*6].reshape(num_seq, -1, 22, 6)
         global_rot_mat = transforms.rotation_6d_to_matrix(global_rot_6d) # N X T X 22 X 3 X 3 
 
@@ -2687,7 +2629,7 @@ class Trainer(object):
             mesh_jnts, mesh_verts, mesh_faces = \
                 run_smplx_model(root_trans[None].cuda(), curr_local_rot_aa_rep[None].cuda(), \
                 betas.cuda(), [gender], self.ds.bm_dict, return_joints24=True)
-            
+
             if self.test_unseen_objects:
                 # Get object verts 
                 obj_rest_verts, obj_mesh_faces = self.unseen_seq_ds.load_rest_pose_object_geometry(object_name)
@@ -2717,16 +2659,6 @@ class Trainer(object):
 
             human_mesh_faces_list.append(mesh_faces)
             obj_mesh_faces_list.append(obj_mesh_faces) 
-            
-            # save_verts = mesh_verts[0].detach().cpu().numpy()
-            # save_jnts = mesh_jnts[0].detach().cpu().numpy()
-            # key_indices = [20, 40, 60, 80, 100]
-    
-            # save_verts = save_verts[key_indices] - save_jnts[key_indices][:, 0][:, np.newaxis, :]
-     
-            # data_4save = {'human_verts':save_verts,'obj_name':str(data_dict['obj_name'][0])}
-            #np.savez(f"/ssd1/lishujia/object-popup/for_popup/{int(data_dict['index'].item()):04d}.npz",data_4save)
-            #continue
 
             if self.compute_metrics:
                 continue 
@@ -2789,7 +2721,7 @@ class Trainer(object):
             start_mesh_path = os.path.join(ball_mesh_save_folder, "start_object.ply")
             end_mesh_path = os.path.join(ball_mesh_save_folder, "end_object.ply") 
             self.export_to_mesh(start_object_mesh, obj_mesh_faces, start_mesh_path)
-          
+           
             if planned_waypoints_pos is not None:
                 if planned_path_floor_height is None:
                     num_waypoints = planned_waypoints_pos[idx].shape[0]
@@ -2866,7 +2798,7 @@ class Trainer(object):
                 # if not os.path.exists(dest_out_vid_path):
                 if not save_obj_only:
                     run_blender_rendering_and_save2video(mesh_save_folder, out_rendered_img_folder, out_vid_file_path, \
-                            condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=False, \
+                            condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=True, \
                             scene_blend_path=curr_scene_blend_path) 
                 
             else:
@@ -2878,7 +2810,7 @@ class Trainer(object):
                     if not os.path.exists(dest_out_vid_path):
                         if not save_obj_only:
                             run_blender_rendering_and_save2video(mesh_save_folder, out_rendered_img_folder, dest_out_vid_path, \
-                                condition_folder=ball_mesh_save_folder, vis_object=False, vis_condition=False, \
+                                condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=True, \
                                 scene_blend_path=floor_blend_path)
                     
                 else:
@@ -2888,13 +2820,13 @@ class Trainer(object):
                         if not vis_gt: # Skip GT visualiation 
                             if not save_obj_only:
                                 run_blender_rendering_and_save2video(mesh_save_folder, out_rendered_img_folder, dest_out_vid_path, \
-                                        condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=False, \
+                                        condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=True, \
                                         scene_blend_path=floor_blend_path)
 
                     if vis_gt: 
                         if not save_obj_only:
                             run_blender_rendering_and_save2video(mesh_save_folder, out_rendered_img_folder, dest_out_vid_path, \
-                                    condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=False, \
+                                    condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=True, \
                                     scene_blend_path=floor_blend_path)
                     
 
@@ -3077,11 +3009,11 @@ class Trainer(object):
             floor_blend_path = os.path.join(self.data_root_folder, "blender_files/floor_colorful_mat.blend")
             if vis_gt: 
                 run_blender_rendering_and_save2video(mesh_save_folder, out_rendered_img_folder, dest_out_vid_path, \
-                        condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=False, \
+                        condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=True, \
                         scene_blend_path=floor_blend_path)
             else:
                 run_blender_rendering_and_save2video(mesh_save_folder, out_rendered_img_folder, dest_out_vid_path, \
-                        condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=False, \
+                        condition_folder=ball_mesh_save_folder, vis_object=True, vis_condition=True, \
                         scene_blend_path=floor_blend_path)
             
             if idx >= 1:
@@ -3221,8 +3153,6 @@ def parse_opt():
 
     # Add language conditions. 
     parser.add_argument("--add_language_condition", action="store_true")
-    # Add mesh conditions.
-    parser.add_argument("--add_mesh_conditions", action="store_true")
 
     # Input the first human pose, maybe can connect the windows better.  
     parser.add_argument("--input_first_human_pose", action="store_true")

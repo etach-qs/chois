@@ -1,9 +1,9 @@
 python trainer_chois.py \
 --window=120 \
 --batch_size=32 \
---data_root_folder="./processed_data" \
---pretrained_model="./pretrained_models/model-10.pt" \
---save_res_folder="./chois_long_seq_in_scene_results" \
+--data_root_folder="/ailab/user/lishujia-hdd/chois_release/data/processed_data" \
+--pretrained_model="/ssd1/lishujia/chois_release/chois_release_mesh_condition_inter5frames/chois_window_120_set0116/weights/model-16.pt" \
+--save_res_folder="./chois_long_seq_mesh_results" \
 --input_first_human_pose \
 --use_random_frame_bps \
 --add_language_condition \

@@ -73,7 +73,7 @@ def get_motion_loader(opt_path, batch_size, ground_truth_dataset, mm_num_samples
 
 def get_motion_loader_for_chois_eval(res_npz_folder, batch_size):
     
-    w_vectorizer = WordVectorizer('/move/u/jiamanli/github/text-to-motion/glove_840B', 'our_vab')
+    w_vectorizer = WordVectorizer('/ssd1/lishujia/chois_release/t2m_eval/CLaM/glove', 'our_vab')
     
     dataset = CHOISEvaluationDataset(res_npz_folder=res_npz_folder, word_vectorizer=w_vectorizer)
 

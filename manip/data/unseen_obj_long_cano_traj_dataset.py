@@ -70,7 +70,7 @@ class UnseenCanoObjectTrajDataset(Dataset):
         self.data_root_folder = data_root_folder 
         self.obj_geo_root_folder = os.path.join(self.data_root_folder, "captured_objects")
         
-        self.rest_object_geo_folder = "/move/u/jiamanli/datasets/semantic_manip/unseen_objects_data/selected_unseen_objects/selected_rotated_zeroed_obj_files"
+        self.rest_object_geo_folder = "/ailab/user/lishujia-hdd/chois_release/data/processed_data/unseen_objects_data/selected_rotated_zeroed_obj_files"
 
         self.bps_path = "./bps.pt"
 
@@ -248,7 +248,6 @@ class UnseenCanoObjectTrajDataset(Dataset):
                 # For debug 
                 # if unseen_obj_name in tmp_debug_visited_object_dict:
                 #     continue 
-
                 unseen_obj_geo_path = os.path.join(unseen_object_geo_folder, unseen_obj_name+".ply")
                 unseen_obj_mesh = trimesh.load_mesh(unseen_obj_geo_path)
                 unseen_obj_verts = unseen_obj_mesh.vertices # Nv X 3 
@@ -260,6 +259,7 @@ class UnseenCanoObjectTrajDataset(Dataset):
                 unseen_obj_com_height = torch.zeros(self.window, 1).float() # 120 X 1 
                 unseen_obj_com_height[0, 0] = unseen_obj_com_on_floor[2]
                 unseen_obj_com_height[-1, 0] = unseen_obj_com_on_floor[2] 
+                unseen_obj_com_height[1:-1,0] = curr_seq_com_pos[1:-1,2]
                 unseen_obj_com_pos = torch.cat((curr_seq_com_pos[:, :2], unseen_obj_com_height), dim=-1) # 120 X 3 
 
                 # Compute BPS 
@@ -279,7 +279,7 @@ class UnseenCanoObjectTrajDataset(Dataset):
                 self.new_window_data_dict[new_cnt]['rest_human_offsets'] = self.window_data_dict[k]['rest_human_offsets'] 
 
                 self.new_window_data_dict[new_cnt]['seq_name'] = seq_name 
-
+            
                 # Add unseen object's data 
                 self.new_window_data_dict[new_cnt]['obj_name'] = unseen_obj_name  
                 self.new_window_data_dict[new_cnt]['window_obj_com_pos'] = unseen_obj_com_pos 
@@ -490,7 +490,22 @@ class UnseenCanoObjectTrajDataset(Dataset):
 
         data_input_dict['s_idx'] = 0
         data_input_dict['e_idx'] = 120 
-
+        data_input_dict['index'] = index
         return data_input_dict 
         # data_input_dict['motion']: T X (22*3+22*6) range [-1, 1]
         # data_input_dict['obj_bps]: T X N X 3 
+if __name__ == "__main__":
+    data_root_folder = "/ailab/user/lishujia-hdd/chois_release/data/processed_data"
+    # UnseenDataset = UnseenCanoObjectTrajDataset(train=False, \
+    #             data_root_folder=data_root_folder, \
+    #             window=120, use_object_splits=False, \
+    #             input_language_condition=True, \
+    #             use_first_frame_bps=False, \
+    #             use_random_frame_bps=True, \
+    #             test_long_seq=False) 
+    # for i in range(len(UnseenDataset)):
+    #     data = UnseenDataset[i]
+    #     print(data['index'])
+    data = np.load("/ssd1/lishujia/chois_release/for_popup/0000.npz",allow_pickle=True)
+    data_dict = data['arr_0'][None][0]
+    import pdb; pdb.set_trace()

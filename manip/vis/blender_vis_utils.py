@@ -28,7 +28,7 @@ if __name__ == "__main__":
                         default='')
     args = parser.parse_args(argv)
     print("args:{0}".format(args))
-
+ 
     # Load the world
     WORLD_FILE = args.scene
     bpy.ops.wm.open_mainfile(filepath=WORLD_FILE)
@@ -43,8 +43,15 @@ if __name__ == "__main__":
     for d in bpy.context.preferences.addons["cycles"].preferences.devices:
         d["use"] = 1 # Using all devices, include GPU and CPU
         print(d["name"], d["use"])
+        # 获取当前场景的世界背景
+    bpy.context.scene.world.use_nodes = True
+    world_nodes = bpy.context.scene.world.node_tree.nodes
 
-    scene_name = args.scene.split("/")[-1].replace("_scene.blend", "")
+    # 找到背景节点
+    bg_node = world_nodes.get("Background")
+    if bg_node:
+        bg_node.inputs[0].default_value = (1, 1, 1, 1)  # 纯白色 (R, G, B, A)
+        scene_name = args.scene.split("/")[-1].replace("_scene.blend", "")
     print("scene name:{0}".format(scene_name))
    
     obj_folder = args.folder
@@ -85,15 +92,53 @@ if __name__ == "__main__":
         
         human_obj_object.rotation_euler = (math.radians(0), math.radians(0), math.radians(0)) # The default seems 90, 0, 0 while importing .obj into blender 
         # obj_object.location.y = 0
-
+        
         human_mat = bpy.data.materials.new(name="MaterialName")  # set new material to variable
         human_obj_object.data.materials.append(human_mat)
         human_mat.use_nodes = True
         principled_bsdf = human_mat.node_tree.nodes['Principled BSDF']
         if principled_bsdf is not None:
             # principled_bsdf.inputs[0].default_value = (220/255.0, 220/255.0, 220/255.0, 1) # Gray, close to white after rendering 
-            principled_bsdf.inputs[0].default_value = (10/255.0, 30/255.0, 225/255.0, 1) # Light Blue, used for floor scene 
+            principled_bsdf.inputs[0].default_value = (0.75, 0.35, 0.10, 1)
+            # num_frames = len(obj_files)  # 计算总帧数
+            # t = frame_idx / (num_frames - 1)  # 归一化 frame_idx 到 [0,1]
 
+            # # 颜色渐变从灰色 (0.86, 0.86, 0.86, 1) 到目标黄色 (0.83, 0.42, 0.17, 1)
+            # start_color = np.array([0.86, 0.86, 0.86, 1])
+            # end_color = np.array([0.83, 0.42, 0.17, 1])
+            # interp_color = (1 - t) * start_color + t * end_color  # 线性插值计算渐变颜色
+
+            # # 设置材质颜色
+            # principled_bsdf.inputs[0].default_value = tuple(interp_color)
+            
+            
+            # shade = frame_idx / (len(obj_files) - 1)  # 计算当前索引的插值系数（0 ~ 1）
+
+            # # 定义颜色范围
+            # color_light = (0.9, 0.6, 0.4)    # 更浅的颜色
+            # color_mid = (0.833, 0.417, 0.167)  # 中间目标颜色
+            # color_dark = (0.6, 0.3, 0.1)      # 更深的颜色
+
+            # # 根据 shade 进行插值计算
+            # if shade < 0.5:
+            #     t = shade * 2  # 归一化到 0~1
+            #     color = (
+            #         (1 - t) * color_light[0] + t * color_mid[0],
+            #         (1 - t) * color_light[1] + t * color_mid[1],
+            #         (1 - t) * color_light[2] + t * color_mid[2],
+            #         1
+            #     )
+            # else:
+            #     t = (shade - 0.5) * 2  # 归一化到 0~1
+            #     color = (
+            #         (1 - t) * color_mid[0] + t * color_dark[0],
+            #         (1 - t) * color_mid[1] + t * color_dark[1],
+            #         (1 - t) * color_mid[2] + t * color_dark[2],
+            #         1
+            #     )
+
+            # # 应用颜色到材质
+            # principled_bsdf.inputs[0].default_value = color
         human_obj_object.active_material = human_mat
 
         # Load object mesh and set material 
@@ -110,7 +155,7 @@ if __name__ == "__main__":
         
         obj_object.rotation_euler = (math.radians(0), math.radians(0), math.radians(0)) # The default seems 90, 0, 0 while importing .obj into blender 
         # obj_object.location.y = 0
-
+    
         mat = bpy.data.materials.new(name="MaterialName")  # set new material to variable
         obj_object.data.materials.append(mat)
         mat.use_nodes = True
@@ -118,7 +163,7 @@ if __name__ == "__main__":
         if principled_bsdf is not None:
             # principled_bsdf.inputs[0].default_value = (220/255.0, 220/255.0, 220/255.0, 1) # Gray, close to white after rendering 
             # principled_bsdf.inputs[0].default_value = (10/255.0, 30/255.0, 225/255.0, 1) # Light Blue, used for floor scene 
-            principled_bsdf.inputs[0].default_value = (153/255.0, 51/255.0, 255/255.0, 1) # Light Purple
+            principled_bsdf.inputs[0].default_value = (53/255.0, 51/255.0, 255/255.0, 1) # Light Purple
 
         obj_object.active_material = mat
 
