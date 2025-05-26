@@ -237,7 +237,7 @@ class TransformerDiffusionModel(nn.Module):
         src = torch.cat((src, condition), dim=-1)
        
         noise_t_embed = self.time_mlp(noise_t) # BS X d_model 
-    
+        #pdb.set_trace()
         # add mesh condition
         if mesh_condition is not None:
             bs, num_frames, num_points, _ = mesh_condition.shape

@@ -1208,16 +1208,16 @@ class CanoObjectTrajDataset(Dataset):
         if self.use_object_keypoints:
             data_input_dict['ori_obj_keypoints'] = paded_transformed_obj_nn_pts # T X K X 3 
             data_input_dict['rest_pose_obj_pts'] = rest_pose_obj_nn_pts # K X 3 
-        
-        
-        # if self.train:
-        #     mesh_path = '/ssd1/lishujia/chois_release/mesh_cond_data2/train/'+ str(index).zfill(5)+'.npz'
-        # else:
-        #     mesh_path = '/ssd1/lishujia/chois_release/mesh_cond_data2/test/'+ str(index).zfill(5)+'.npz'
-        # mesh_data = np.load(mesh_path)
-        # data_input_dict['human_mesh'] = torch.from_numpy(mesh_data['human_mesh']).float()
-        # # data_input_dict['human_mesh'] = torch.from_numpy(self.mesh_window_data_dict[index]['human_mesh'])
-        # data_input_dict['obj_mesh'] = torch.from_numpy(mesh_data['obj_mesh']).float()
+        data_input_dict['index']=index
+ 
+        if self.train:
+            mesh_path = '/ssd1/lishujia/gen_dataset/omom_mesh_data1/train/'+ str(index).zfill(5)+'.npz'
+        else:
+            mesh_path = '/ssd1/lishujia/gen_dataset/omom_mesh_data1/test/'+ str(index).zfill(5)+'.npz'
+        mesh_data = np.load(mesh_path, allow_pickle=True)
+        data_input_dict['human_mesh'] = torch.from_numpy(mesh_data['human_mesh']).float()
+        # data_input_dict['human_mesh'] = torch.from_numpy(self.mesh_window_data_dict[index]['human_mesh'])
+        data_input_dict['obj_mesh'] = torch.from_numpy(mesh_data['obj_mesh']).float()
         
     #     """
     #     get the human and object mesh sequence 
@@ -1292,7 +1292,7 @@ def load_rest_pose_object_geometry(rest_obj_path, object_name):
     obj_mesh_faces = np.asarray(mesh.faces) # Nf X 3
 
     return rest_verts, obj_mesh_faces 
-def farthest_point_sampling(points, num_samples):
+def farthest_point_sampling(points, num_samples=1000):
 
     fpoints = points.shape[0]
     sampled_indices = np.zeros(num_samples, dtype=np.int32)  # 记录采样的索引
@@ -1311,7 +1311,38 @@ def farthest_point_sampling(points, num_samples):
     # 4. 获取采样点
     sampled_points = points[sampled_indices]
     return sampled_points, sampled_indices
+def farthest_point_sampling_torch(points: torch.Tensor, num_samples: int):
+    """
+    Batched farthest point sampling (FPS).
+    
+    Args:
+        points: Tensor of shape [B, N, 3] on CPU or CUDA
+        num_samples: int, number of samples to draw
+    
+    Returns:
+        sampled_points: Tensor of shape [B, num_samples, 3]
+        sampled_indices: Tensor of shape [B, num_samples]
+    """
+    B, N, _ = points.shape
+    device = points.device
 
+    sampled_indices = torch.zeros((B, num_samples), dtype=torch.long, device=device)
+    distances = torch.full((B, N), float('inf'), device=device)
+    
+    # Randomly select initial index for each batch
+    farthest = torch.randint(0, N, (B,), dtype=torch.long, device=device)
+
+    batch_indices = torch.arange(B, dtype=torch.long, device=device)
+
+    for i in range(num_samples):
+        sampled_indices[:, i] = farthest
+        centroid = points[batch_indices, farthest, :].view(B, 1, 3)  # [B, 1, 3]
+        dist = torch.norm(points - centroid, dim=2)  # [B, N]
+        distances = torch.minimum(distances, dist)
+        farthest = torch.max(distances, dim=1)[1]
+
+    sampled_points = torch.gather(points, 1, sampled_indices.unsqueeze(-1).expand(-1, -1, 3))
+    return sampled_points, sampled_indices
 
 def sample_human_points_near_object(obj_mesh_verts, human_mesh_verts, num_samples=1000):
     """
@@ -1344,52 +1375,54 @@ def sample_human_points_near_object(obj_mesh_verts, human_mesh_verts, num_sample
     return sampled_human_points
 
 if __name__ == "__main__":
-
+    from tqdm import tqdm
     res_obj_geo_folder = '/ailab/user/lishujia-hdd/chois_release/data/processed_data/rest_object_geo'
-    ori_folder = "/ssd1/lishujia/chois_release/mesh_cond_data/train"
-    ori_folder_human = "/ssd1/lishujia/chois_release/mesh_cond_data1/train"
-    tgt_folder = "/ssd1/lishujia/chois_release/mesh_cond_data2/train"
-    obj_name_dict = joblib.load('/ssd1/lishujia/chois_release/mesh_cond_data1/train_objname_index.p')
-    # def process_file(file):
-    #     file_path = os.path.join(ori_folder, file)
-    #     human_path = os.path.join(ori_folder_human, file)
-    #     target_path = os.path.join(tgt_folder, file)
+    #ori_folder = "/ssd1/lishujia/chois_release/mesh_cond_data/train"
+    ori_folder_human = "/ssd1/lishujia/gen_dataset/omom_mesh_data/train"
+    tgt_folder = "/ssd1/lishujia/gen_dataset/omom_mesh_data2/train"
+    obj_name_dict = joblib.load('/ssd1/lishujia/gen_dataset/omom_mesh_data/train_objname_index.p')
+    #data = np.load(tgt_folder+'/00001.npz',allow_pickle=True)
+    #pdb.set_trace()
+    def process_file(file):
+        file_path = os.path.join(ori_folder_human, file)
+        human_path = os.path.join(ori_folder_human, file)
+        target_path = os.path.join(tgt_folder, file)
         
-    #     if os.path.exists(target_path):
-    #         print('return')
-    #         return  # 目标文件已存在，跳过
+        if os.path.exists(target_path):
+            print('return')
+            return  # 目标文件已存在，跳过
 
-    #     mesh_dict = np.load(file_path)  # 读取数据
-    #     mesh_dict_human = np.load(human_path)
-    #     obj_verts = mesh_dict['obj_mesh']
-    #     human_verts = mesh_dict_human['human_mesh']
-        
-    #     index = int(file.split('.')[0])
-    #     if index not in obj_name_dict:
-    #         print(f"Warning: index {index} not found in obj_name_dict")
-    #         return
-        
-    #     obj_name = obj_name_dict[index]
-    #     sampled_index = np.load(os.path.join(res_obj_geo_folder, obj_name + '_500_indices.npy'))
-        
-    #     if np.max(sampled_index) >= obj_verts.shape[1]:
-    #         print(f"Error: sampled_index out-of-bounds for {file}")
-    #         return
-        
-    #     obj_sampled_verts = obj_verts[:, sampled_index]  # 采样物体点云
-    #     sampled_human_verts = sample_human_points_near_object(obj_sampled_verts, human_verts)  # 采样人体点云
-       
-    #     # 存储
-    #     np.savez(target_path, obj_mesh=obj_sampled_verts, human_mesh=sampled_human_verts)
-    #     print(f"Processed: {file}")
+        mesh_dict = np.load(file_path, allow_pickle=True)['arr_0'][None][0]  # 读取数据
+        #mesh_dict_human = np.load(human_path)
+        obj_verts = mesh_dict['obj_mesh']
+        human_verts = torch.tensor(mesh_dict['human_mesh']).cuda()
     
-    # #data = np.load('/ssd1/lishujia/chois_release/mesh_cond_data2/test/00000.npz')
-    # #pdb.set_trace()
+        index = int(file.split('.')[0])
+        if index not in obj_name_dict:
+            print(f"Warning: index {index} not found in obj_name_dict")
+            return
+        
+        obj_name = obj_name_dict[index][0]
+        sampled_index = np.load(os.path.join(res_obj_geo_folder, obj_name + '_500_indices.npy'))
+        
+        if np.max(sampled_index) >= obj_verts.shape[1]:
+            print(f"Error: sampled_index out-of-bounds for {file}")
+            return
+      
+        obj_sampled_verts = obj_verts[:, sampled_index]  # 采样物体点云
+        #sampled_human_verts = sample_human_points_near_object(obj_sampled_verts, human_verts)  # KNN
+        sampled_human_verts, human_indices = farthest_point_sampling_torch(human_verts,1000)  # 
+        # 存储
+        sampled_human_verts = sampled_human_verts.detach().cpu().numpy()
+        np.savez(target_path, obj_mesh=obj_sampled_verts, human_mesh=sampled_human_verts)
+        #print(f"Processed: {file}")
+    for file in tqdm(os.listdir(ori_folder_human)):
+        process_file(file=file)
     # from multiprocess import Pool
     # num_workers = min(32, os.cpu_count())  # 限制最大并发数
     # with Pool(num_workers) as p:
-    #     p.map(process_file, os.listdir(ori_folder))
-    # for file in os.listdir(ori_folder):
+    #     p.map(process_file, os.listdir(ori_folder_human))
+    # for file in os.listdir(ori_folder_human):
     #     if os.path.exists(os.path.join(tgt_folder,file)):
     #         print('continue')
     #         continue
@@ -1422,12 +1455,12 @@ if __name__ == "__main__":
     #     rest_verts, obj_mesh_faces = load_rest_pose_object_geometry(res_obj_geo_folder, name)
     #     sampled_points, sampled_indices = farthest_point_sampling(rest_verts, 500)
     #     np.save(os.path.join(res_obj_geo_folder,name+'_500_indices.npy'), sampled_indices)
-    data_root_folder = '/ailab/user/lishujia-hdd/chois_release/data/processed_data'
-    dataset = CanoObjectTrajDataset(train=True, use_random_frame_bps=True, use_object_keypoints=True, data_root_folder=data_root_folder)
-    print(len(dataset))
-    for i in range(len(dataset)):
-        print(i)
-        data_input_dict = dataset[i]
-    pdb.set_trace()
+    # data_root_folder = '/ailab/user/lishujia-hdd/chois_release/data/processed_data'
+    # dataset = CanoObjectTrajDataset(train=True, use_random_frame_bps=True, use_object_keypoints=True, data_root_folder=data_root_folder)
+    # print(len(dataset))
+    # for i in range(len(dataset)):
+    #     print(i)
+    #     data_input_dict = dataset[i]
+    # pdb.set_trace()
 
 

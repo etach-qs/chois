@@ -40,7 +40,7 @@ def index_points(points, idx):
         new_points:, indexed points data, [B, S, C]
     """
     N = points.shape[1]
-    idx = torch.clamp(idx, max=N-1)  # 确保 idx 不超出 [0, N-1]
+    #idx = torch.clamp(idx, max=N-1)  # 确保 idx 不超出 [0, N-1]
     device = points.device
     B = points.shape[0]
     view_shape = list(idx.shape)
@@ -315,7 +315,7 @@ class PointNetv2(nn.Module):
         )
 
     def forward(self, xyz):
-        # import pdb; pdb.set_trace()
+        #import pdb; pdb.set_trace()
         xyz = xyz.transpose(2, 1)
         B, _, _ = xyz.shape
 

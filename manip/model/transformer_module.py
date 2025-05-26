@@ -154,6 +154,7 @@ class MeshDecoderLayer(nn.Module):
         # time_mask: BS X T X T (padding postion are ones)
         # padding_mask: BS X T (padding position are zeros, diff usage from above)
         # mesh_embedding: BS X T X D
+    
         bs, dec_len, dec_hidden = decoder_input.shape
         
         decoder_out, dec_self_attn = self.self_attn(decoder_input, decoder_input, decoder_input, \
@@ -209,7 +210,7 @@ class Decoder(nn.Module):
         # decoder_pos_vec: BS X 1 X T
         # obj_embedding: BS X 1 X D
         dec_self_attn_list = []
-       
+      
         padding_mask = padding_mask.squeeze(1) # BS X T
         decoder_pos_vec = decoder_pos_vec.squeeze(1) # BS X T
         input_embedding = self.start_conv(decoder_input)  # BS X D X T
@@ -228,7 +229,7 @@ class Decoder(nn.Module):
         else:
             time_mask = get_subsequent_mask(decoder_pos_vec) 
         # BS X T X T (Prev steps are 0, later 1)
-       
+
         dec_output = new_input_embedding + pos_embedding # BS X T X D
         
       

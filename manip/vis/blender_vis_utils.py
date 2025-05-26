@@ -39,6 +39,13 @@ if __name__ == "__main__":
     bpy.context.scene.cycles.device = "GPU"
     bpy.context.preferences.addons['cycles'].preferences.compute_device_type = 'CUDA'
     bpy.context.preferences.addons["cycles"].preferences.get_devices()
+
+        # 设置图像分辨率
+    bpy.context.scene.render.resolution_x = 1920
+    bpy.context.scene.render.resolution_y = 1080
+    bpy.context.scene.render.resolution_percentage = 100
+
+
     print(bpy.context.preferences.addons["cycles"].preferences.compute_device_type)
     for d in bpy.context.preferences.addons["cycles"].preferences.devices:
         d["use"] = 1 # Using all devices, include GPU and CPU
@@ -100,45 +107,6 @@ if __name__ == "__main__":
         if principled_bsdf is not None:
             # principled_bsdf.inputs[0].default_value = (220/255.0, 220/255.0, 220/255.0, 1) # Gray, close to white after rendering 
             principled_bsdf.inputs[0].default_value = (0.75, 0.35, 0.10, 1)
-            # num_frames = len(obj_files)  # 计算总帧数
-            # t = frame_idx / (num_frames - 1)  # 归一化 frame_idx 到 [0,1]
-
-            # # 颜色渐变从灰色 (0.86, 0.86, 0.86, 1) 到目标黄色 (0.83, 0.42, 0.17, 1)
-            # start_color = np.array([0.86, 0.86, 0.86, 1])
-            # end_color = np.array([0.83, 0.42, 0.17, 1])
-            # interp_color = (1 - t) * start_color + t * end_color  # 线性插值计算渐变颜色
-
-            # # 设置材质颜色
-            # principled_bsdf.inputs[0].default_value = tuple(interp_color)
-            
-            
-            # shade = frame_idx / (len(obj_files) - 1)  # 计算当前索引的插值系数（0 ~ 1）
-
-            # # 定义颜色范围
-            # color_light = (0.9, 0.6, 0.4)    # 更浅的颜色
-            # color_mid = (0.833, 0.417, 0.167)  # 中间目标颜色
-            # color_dark = (0.6, 0.3, 0.1)      # 更深的颜色
-
-            # # 根据 shade 进行插值计算
-            # if shade < 0.5:
-            #     t = shade * 2  # 归一化到 0~1
-            #     color = (
-            #         (1 - t) * color_light[0] + t * color_mid[0],
-            #         (1 - t) * color_light[1] + t * color_mid[1],
-            #         (1 - t) * color_light[2] + t * color_mid[2],
-            #         1
-            #     )
-            # else:
-            #     t = (shade - 0.5) * 2  # 归一化到 0~1
-            #     color = (
-            #         (1 - t) * color_mid[0] + t * color_dark[0],
-            #         (1 - t) * color_mid[1] + t * color_dark[1],
-            #         (1 - t) * color_mid[2] + t * color_dark[2],
-            #         1
-            #     )
-
-            # # 应用颜色到材质
-            # principled_bsdf.inputs[0].default_value = color
         human_obj_object.active_material = human_mat
 
         # Load object mesh and set material 
